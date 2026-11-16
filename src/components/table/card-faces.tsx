@@ -1,10 +1,91 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { DeckStyle } from "./deck-styles";
 import type { CardData } from "./types";
 
 const face = "absolute inset-0 rounded-[10px] backface-hidden";
 
+// --- UNO-style deck (Mini Games) -------------------------------------------------
+const UNO_RED = "#d72600";
+const UNO_FACE_COLORS = ["#d72600", "#0956bf", "#379711", "#ecd407"];
+// Sizes use container-query units (cqw) so lettering scales with the card.
+const unoType = (size: string, color: string) => ({
+  fontSize: size,
+  color,
+  WebkitTextStroke: "0.07em #111",
+  paintOrder: "stroke fill",
+  textShadow: "0.05em 0.06em 0 #111",
+});
+
+// White border, coloured field, tilted oval: the shared UNO card layout.
+function UnoShell({
+  color,
+  oval,
+  flipped,
+  children,
+}: {
+  color: string;
+  oval: string;
+  flipped?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`${face} ${flipped ? "rotate-y-180" : ""} @container bg-white p-[5%] shadow-[0_2px_6px_rgba(0,0,0,.35)]`}
+    >
+      <div className="relative h-full w-full overflow-hidden rounded-[7px]" style={{ background: color }}>
+        <div
+          className="absolute left-1/2 top-1/2 h-[86%] w-[60%] -translate-x-1/2 -translate-y-1/2 rotate-[30deg] rounded-[50%]"
+          style={{ background: oval }}
+        />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function UnoBack({ label }: { label: string }) {
+  return (
+    <UnoShell color="#111" oval={UNO_RED}>
+      <div className="absolute inset-0 grid -rotate-[22deg] place-items-center" aria-hidden>
+        <div className="flex flex-col items-center font-sans font-black italic leading-[0.9] tracking-tight">
+          <span style={unoType("12cqw", "#fbd800")}>MINI</span>
+          <span style={unoType("21cqw", "#fbd800")}>GAMES</span>
+        </div>
+      </div>
+      <span className="sr-only">{label}</span>
+    </UnoShell>
+  );
+}
+
+function UnoFace({ card, index }: { card: CardData; index: number }) {
+  const color = UNO_FACE_COLORS[index % UNO_FACE_COLORS.length];
+  const n = String(index + 1);
+  const corner = "absolute font-sans font-black italic leading-none";
+  return (
+    <UnoShell color={color} oval="#fff" flipped>
+      <span className={`${corner} left-[7%] top-[5%]`} style={unoType("15cqw", "#fff")} aria-hidden>
+        {n}
+      </span>
+      <span className={`${corner} bottom-[5%] right-[7%] rotate-180`} style={unoType("15cqw", "#fff")} aria-hidden>
+        {n}
+      </span>
+      <div className="absolute inset-0 grid place-items-center">
+        <div className="flex flex-col items-center">
+          <span className="font-sans font-black italic leading-none" style={unoType("40cqw", color)} aria-hidden>
+            {n}
+          </span>
+          <span className="mt-[3cqw] font-mono uppercase tracking-[0.18em] text-ink/55" style={{ fontSize: "6.5cqw" }}>
+            {card.kind === "placeholder" ? card.title : ""}
+          </span>
+        </div>
+      </div>
+    </UnoShell>
+  );
+}
+
+// --- Playing-card decks ----------------------------------------------------------
 export function CardBack({ style, label }: { style: DeckStyle; label: string }) {
+  if (style.variant === "uno") return <UnoBack label={label} />;
   const lattice: CSSProperties = {
     backgroundImage: `repeating-linear-gradient(45deg, ${style.trim} 0 1px, transparent 1px 9px),
       repeating-linear-gradient(-45deg, ${style.trim} 0 1px, transparent 1px 9px)`,
@@ -46,7 +127,18 @@ function Index({ style, rank, flip }: { style: DeckStyle; rank: string; flip?: b
   );
 }
 
-export function CardFace({ card, style, rank }: { card: CardData; style: DeckStyle; rank: string }) {
+export function CardFace({
+  card,
+  style,
+  rank,
+  index,
+}: {
+  card: CardData;
+  style: DeckStyle;
+  rank: string;
+  index: number;
+}) {
+  if (style.variant === "uno") return <UnoFace card={card} index={index} />;
   const base = `${face} rotate-y-180 overflow-hidden bg-ivory text-ink shadow-[0_2px_8px_rgba(0,0,0,.35)]`;
 
   if (card.kind === "contact") {

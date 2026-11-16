@@ -7,6 +7,7 @@ export type DeckStyle = {
   back: string; // card back base colour
   trim: string; // lattice + border colour on the back
   shape: "portrait" | "landscape";
+  variant?: "uno"; // UNO-style back and faces instead of the playing-card look
 };
 
 export const DECK_STYLES: Record<DeckId, DeckStyle> = {
@@ -14,7 +15,7 @@ export const DECK_STYLES: Record<DeckId, DeckStyle> = {
   work: { suit: "♠", red: false, back: "#1d3557", trim: "rgba(214,228,245,.34)", shape: "portrait" },
   projects: { suit: "♦", red: true, back: "#4a2c5e", trim: "rgba(236,214,245,.34)", shape: "portrait" },
   contact: { suit: "✦", red: false, back: "#ece4d2", trim: "rgba(31,27,22,.22)", shape: "landscape" },
-  games: { suit: "♣", red: false, back: "#22201d", trim: "rgba(233,196,106,.42)", shape: "portrait" },
+  games: { suit: "♣", red: false, back: "#111111", trim: "#ffffff", shape: "portrait", variant: "uno" },
 };
 
 // Card sizes. Deck = small, on the table edge. Dealt = larger, laid out to read.

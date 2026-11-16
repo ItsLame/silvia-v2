@@ -7,12 +7,13 @@ import { CARD_RADIUS, DECK_STYLES, SIZE } from "./deck-styles";
 import type { DeckData, DeckId } from "./types";
 import { useCardSounds } from "./use-card-sounds";
 
-// idle → shuffling → dealt → collecting → idle
-type Phase = "idle" | "shuffling" | "dealt" | "collecting";
+// idle → dealt → collecting → idle. After collecting, that deck shuffles (tracked
+// separately so another deck can be dealt while the returned one is still shuffling).
+type Phase = "idle" | "dealt" | "collecting";
 type TableState = { deck: DeckId | null; phase: Phase };
 
 // Timings, in seconds.
-const SHUFFLE = 0.75;
+const SHUFFLE = 0.85; // riffle length incl. per-card stagger; the deck ignores clicks until done
 const DEAL_STAGGER = 0.09;
 const LANDING = 0.4; // roughly when a dealt card settles after it starts flying
 const FLIP = 0.45;
@@ -24,16 +25,18 @@ const spring = (delay = 0) => ({ type: "spring", stiffness: 240, damping: 28, ma
 const REST_TILT = [-2.5, 1.8, -1.2, 2.4, -1.8, 1.1, -2.1, 1.5];
 const rank = (i: number) => (i === 0 ? "A" : String(i + 1));
 
-const HINT: Record<Phase, string> = {
+const HINT: Record<Phase | "shuffling", string> = {
   idle: "Pick a deck",
-  shuffling: "Shuffling…",
   dealt: "Click the deck again or press Esc to gather",
   collecting: "Gathering…",
+  shuffling: "Shuffling…",
 };
 
 export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
   const [state, setState] = useState<TableState>({ deck: null, phase: "idle" });
   const stateRef = useRef(state);
+  const [shuffling, setShufflingState] = useState<DeckId | null>(null);
+  const shufflingRef = useRef<DeckId | null>(null);
   const timers = useRef<number[]>([]);
   const spreadRef = useRef<HTMLElement>(null);
   const { play, unlock, muted, toggleMuted } = useCardSounds();
@@ -48,25 +51,35 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
+  const setShuffling = (id: DeckId | null) => {
+    shufflingRef.current = id;
+    setShufflingState(id);
+  };
+
   const deal = (id: DeckId) => {
     const count = byId.get(id)!.cards.length;
-    set({ deck: id, phase: "shuffling" });
-    play("shuffle");
-    after(SHUFFLE, () => {
-      set({ deck: id, phase: "dealt" });
-      for (let i = 0; i < count; i++) play("place", i * DEAL_STAGGER + LANDING, 0.55);
-      // If the spread starts low in the window, follow the cards down as they fly.
-      requestAnimationFrame(() => {
-        const top = spreadRef.current?.getBoundingClientRect().top ?? 0;
-        const target = window.innerHeight * 0.38;
-        if (top > target + 40) {
-          const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          window.scrollBy({ top: top - target, behavior: reduce ? "auto" : "smooth" });
-        }
-      });
+    set({ deck: id, phase: "dealt" });
+    for (let i = 0; i < count; i++) play("place", i * DEAL_STAGGER + LANDING, 0.55);
+    // If the spread starts low in the window, follow the cards down as they fly.
+    requestAnimationFrame(() => {
+      const top = spreadRef.current?.getBoundingClientRect().top ?? 0;
+      const target = window.innerHeight * 0.38;
+      if (top > target + 40) {
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollBy({ top: top - target, behavior: reduce ? "auto" : "smooth" });
+      }
     });
   };
 
+  const shuffle = (id: DeckId) => {
+    setShuffling(id);
+    play("shuffle");
+    after(SHUFFLE, () => {
+      if (shufflingRef.current === id) setShuffling(null);
+    });
+  };
+
+  // Cards fly back into the deck, then the deck shuffles. `then` runs once they're back.
   const collect = (then?: () => void) => {
     const { deck, phase } = stateRef.current;
     if (phase !== "dealt" || !deck) return;
@@ -75,6 +88,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     for (let i = 0; i < count; i++) play("take", i * COLLECT_STAGGER, 0.45);
     after(count * COLLECT_STAGGER + COLLECT, () => {
       set({ deck: null, phase: "idle" });
+      shuffle(deck);
       then?.();
     });
   };
@@ -82,7 +96,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   const onDeck = (id: DeckId) => {
     unlock();
     const { deck, phase } = stateRef.current;
-    if (phase === "shuffling" || phase === "collecting") return;
+    if (phase === "collecting" || shufflingRef.current === id) return;
     if (phase === "dealt") return deck === id ? collect() : collect(() => deal(id));
     deal(id);
   };
@@ -113,13 +127,14 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
                 key={deck.id}
                 deck={deck}
                 phase={state.deck === deck.id ? state.phase : "idle"}
+                shuffling={shuffling === deck.id}
                 onSelect={() => onDeck(deck.id)}
               />
             ))}
           </div>
 
           <p className="mt-8 h-4 font-mono text-[11px] uppercase tracking-[0.24em] text-ivory/45" aria-live="polite">
-            {HINT[state.phase]}
+            {HINT[state.phase === "idle" && shuffling ? "shuffling" : state.phase]}
           </p>
 
           <section
@@ -147,7 +162,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
                     transition={{ delay: delay + LANDING, duration: FLIP, ease: [0.3, 0.7, 0.2, 1] }}
                   >
                     <CardBack style={style} label={`${open.label} card`} />
-                    <CardFace card={card} style={style} rank={rank(i)} />
+                    <CardFace card={card} style={style} rank={rank(i)} index={i} />
                   </motion.div>
                 </motion.div>
               );
@@ -159,11 +174,20 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   );
 }
 
-function Deck({ deck, phase, onSelect }: { deck: DeckData; phase: Phase; onSelect: () => void }) {
+function Deck({
+  deck,
+  phase,
+  shuffling,
+  onSelect,
+}: {
+  deck: DeckData;
+  phase: Phase;
+  shuffling: boolean;
+  onSelect: () => void;
+}) {
   const style = DECK_STYLES[deck.id];
   const count = deck.cards.length;
   const dealt = phase === "dealt";
-  const shuffling = phase === "shuffling";
 
   return (
     <button
@@ -199,7 +223,7 @@ function Deck({ deck, phase, onSelect }: { deck: DeckData; phase: Phase; onSelec
                     : { x: 0, y: 0, rotate: 0 }
                 }
                 transition={{
-                  default: { duration: SHUFFLE * 0.9, times: [0, 0.3, 0.62, 1], ease: "easeInOut", delay: Math.min(i, 7) * 0.018 },
+                  default: { duration: 0.68, times: [0, 0.3, 0.62, 1], ease: "easeInOut", delay: Math.min(i, 7) * 0.018 },
                   layout: spring(i * COLLECT_STAGGER),
                 }}
               >
