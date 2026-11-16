@@ -18,10 +18,20 @@ export const DECK_STYLES: Record<DeckId, DeckStyle> = {
   games: { suit: "♣", red: false, back: "#111111", trim: "#ffffff", shape: "portrait", variant: "uno" },
 };
 
-// Card sizes. Deck = small, on the table edge. Dealt = larger, laid out to read.
+// Card sizes. Pile = the single starting deck. Deck = small, on the table edge.
+// Dealt = larger, laid out to read. Landscape pile cards lie sideways, so their
+// width roughly matches the portrait pile card's height.
 export const SIZE = {
-  portrait: { deck: "w-[76px] sm:w-[104px] aspect-[5/7]", dealt: "w-[148px] sm:w-[184px] aspect-[5/7]" },
-  landscape: { deck: "w-[108px] sm:w-[148px] aspect-[7/4]", dealt: "w-[300px] sm:w-[360px] aspect-[7/4]" },
+  portrait: {
+    pile: "w-[96px] sm:w-[128px] aspect-[5/7]",
+    deck: "w-[76px] sm:w-[104px] aspect-[5/7]",
+    dealt: "w-[148px] sm:w-[184px] aspect-[5/7]",
+  },
+  landscape: {
+    pile: "w-[128px] sm:w-[170px] aspect-[7/4]",
+    deck: "w-[108px] sm:w-[148px] aspect-[7/4]",
+    dealt: "w-[300px] sm:w-[360px] aspect-[7/4]",
+  },
 } as const;
 
 export const CARD_RADIUS = 10;

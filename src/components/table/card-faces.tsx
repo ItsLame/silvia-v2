@@ -5,7 +5,7 @@ import type { CardData } from "./types";
 const face = "absolute inset-0 rounded-[10px] backface-hidden";
 
 // --- UNO-style deck (Mini Games) -------------------------------------------------
-const UNO_RED = "#d72600";
+const UNO_RED = "#d6121c"; // back oval; faces use their own palette below
 const UNO_FACE_COLORS = ["#d72600", "#0956bf", "#379711", "#ecd407"];
 // Sizes use container-query units (cqw) so lettering scales with the card.
 const unoType = (size: string, color: string) => ({
@@ -20,11 +20,13 @@ const unoType = (size: string, color: string) => ({
 function UnoShell({
   color,
   oval,
+  ovalSize = "h-[88%] w-[66%]",
   flipped,
   children,
 }: {
   color: string;
   oval: string;
+  ovalSize?: string;
   flipped?: boolean;
   children: ReactNode;
 }) {
@@ -34,7 +36,7 @@ function UnoShell({
     >
       <div className="relative h-full w-full overflow-hidden rounded-[7px]" style={{ background: color }}>
         <div
-          className="absolute left-1/2 top-1/2 h-[86%] w-[60%] -translate-x-1/2 -translate-y-1/2 rotate-[30deg] rounded-[50%]"
+          className={`absolute left-1/2 top-1/2 ${ovalSize} -translate-x-1/2 -translate-y-1/2 rotate-[28deg] rounded-[50%]`}
           style={{ background: oval }}
         />
         {children}
@@ -43,13 +45,31 @@ function UnoShell({
   );
 }
 
+// The UNO logo treatment: yellow fill, heavy black outline, a black extrusion
+// stepping down-left, and a thin white rim around the whole thing.
+const unoLogo = (size: string): CSSProperties => ({
+  fontSize: size,
+  color: "#ffe100",
+  WebkitTextStroke: "0.09em #0b0b0b",
+  paintOrder: "stroke fill",
+  textShadow: [1, 2, 3, 4, 5, 6].map((s) => `${-s * 0.014}em ${s * 0.014}em 0 #0b0b0b`).join(","),
+  filter: "drop-shadow(0 0 0.6px rgba(255,255,255,.9))",
+});
+
 function UnoBack({ label }: { label: string }) {
   return (
-    <UnoShell color="#111" oval={UNO_RED}>
-      <div className="absolute inset-0 grid -rotate-[22deg] place-items-center" aria-hidden>
-        <div className="flex flex-col items-center font-sans font-black italic leading-[0.9] tracking-tight">
-          <span style={unoType("12cqw", "#fbd800")}>MINI</span>
-          <span style={unoType("21cqw", "#fbd800")}>GAMES</span>
+    // Oval nearly fills the field, as on a real UNO card.
+    <UnoShell color="#0b0b0b" oval={UNO_RED} ovalSize="h-[100%] w-[74%]">
+      {/* Two lines, staggered along the oval (MINI up-right, GAMES down-left) so the
+          lettering fills it, spilling slightly past the edges like the UNO logo. */}
+      <div className="absolute inset-0 grid -rotate-[20deg] place-items-center" aria-hidden>
+        <div className="flex flex-col font-sans font-black italic leading-[0.82] tracking-[-0.02em]">
+          <span className="translate-x-[22%] self-start" style={unoLogo("21cqw")}>
+            MINI
+          </span>
+          <span className="-translate-x-[4%]" style={unoLogo("26cqw")}>
+            GAMES
+          </span>
         </div>
       </div>
       <span className="sr-only">{label}</span>

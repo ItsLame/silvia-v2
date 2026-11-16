@@ -7,13 +7,16 @@ import { CARD_RADIUS, DECK_STYLES, SIZE } from "./deck-styles";
 import type { DeckData, DeckId } from "./types";
 import { useCardSounds } from "./use-card-sounds";
 
-// idle → dealt → collecting → idle. After collecting, that deck shuffles (tracked
-// separately so another deck can be dealt while the returned one is still shuffling).
+// Start: one pile (a card from each deck). Click → it shuffles and lays out the decks.
+type Stage = "pile" | "shuffling" | "table";
+// Then, per deck: idle → dealt → collecting → idle.
 type Phase = "idle" | "dealt" | "collecting";
 type TableState = { deck: DeckId | null; phase: Phase };
 
 // Timings, in seconds.
-const SHUFFLE = 0.85; // riffle length incl. per-card stagger; the deck ignores clicks until done
+const SHUFFLE = 0.85; // riffle length incl. per-card stagger
+const DECK_STAGGER = 0.08; // decks flying out of the pile
+const DECK_LANDING = 0.35;
 const DEAL_STAGGER = 0.09;
 const LANDING = 0.4; // roughly when a dealt card settles after it starts flying
 const FLIP = 0.45;
@@ -24,19 +27,24 @@ const spring = (delay = 0) => ({ type: "spring", stiffness: 240, damping: 28, ma
 // Deterministic "tossed onto the table" tilt; random values would break prerendering.
 const REST_TILT = [-2.5, 1.8, -1.2, 2.4, -1.8, 1.1, -2.1, 1.5];
 const rank = (i: number) => (i === 0 ? "A" : String(i + 1));
+const deckLayoutId = (id: DeckId) => `deck-${id}`;
 
-const HINT: Record<Phase | "shuffling", string> = {
+const HINT: Record<Stage | Phase, string> = {
+  pile: "Click the deck to deal",
+  shuffling: "Shuffling…",
+  table: "",
   idle: "Pick a deck",
   dealt: "Click the deck again or press Esc to gather",
   collecting: "Gathering…",
-  shuffling: "Shuffling…",
 };
 
+const HIGHLIGHT =
+  "outline-2 outline-offset-[3px] outline-transparent transition-[outline-color,box-shadow] group-hover:shadow-[0_0_22px_rgba(250,204,21,.35)] group-hover:outline-highlight group-focus-visible:shadow-[0_0_22px_rgba(250,204,21,.35)] group-focus-visible:outline-highlight";
+
 export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
+  const [stage, setStage] = useState<Stage>("pile");
   const [state, setState] = useState<TableState>({ deck: null, phase: "idle" });
   const stateRef = useRef(state);
-  const [shuffling, setShufflingState] = useState<DeckId | null>(null);
-  const shufflingRef = useRef<DeckId | null>(null);
   const timers = useRef<number[]>([]);
   const spreadRef = useRef<HTMLElement>(null);
   const { play, unlock, muted, toggleMuted } = useCardSounds();
@@ -51,9 +59,15 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  const setShuffling = (id: DeckId | null) => {
-    shufflingRef.current = id;
-    setShufflingState(id);
+  const openTable = () => {
+    unlock();
+    if (stage !== "pile") return;
+    setStage("shuffling");
+    play("shuffle");
+    after(SHUFFLE, () => {
+      setStage("table");
+      decks.forEach((_, i) => play("place", i * DECK_STAGGER + DECK_LANDING, 0.5));
+    });
   };
 
   const deal = (id: DeckId) => {
@@ -71,15 +85,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     });
   };
 
-  const shuffle = (id: DeckId) => {
-    setShuffling(id);
-    play("shuffle");
-    after(SHUFFLE, () => {
-      if (shufflingRef.current === id) setShuffling(null);
-    });
-  };
-
-  // Cards fly back into the deck, then the deck shuffles. `then` runs once they're back.
+  // Cards fly back into their deck. `then` runs once they're back.
   const collect = (then?: () => void) => {
     const { deck, phase } = stateRef.current;
     if (phase !== "dealt" || !deck) return;
@@ -88,7 +94,6 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     for (let i = 0; i < count; i++) play("take", i * COLLECT_STAGGER, 0.45);
     after(count * COLLECT_STAGGER + COLLECT, () => {
       set({ deck: null, phase: "idle" });
-      shuffle(deck);
       then?.();
     });
   };
@@ -96,7 +101,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   const onDeck = (id: DeckId) => {
     unlock();
     const { deck, phase } = stateRef.current;
-    if (phase === "collecting" || shufflingRef.current === id) return;
+    if (phase === "collecting") return;
     if (phase === "dealt") return deck === id ? collect() : collect(() => deal(id));
     deal(id);
   };
@@ -121,20 +126,24 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
             <p className="mt-4 font-mono text-xs uppercase tracking-[0.32em] text-ivory/60 sm:text-sm">{headline}</p>
           </header>
 
-          <div className="mt-14 flex flex-wrap items-end justify-center gap-x-6 gap-y-8 sm:mt-20 sm:gap-x-12">
-            {decks.map((deck) => (
-              <Deck
-                key={deck.id}
-                deck={deck}
-                phase={state.deck === deck.id ? state.phase : "idle"}
-                shuffling={shuffling === deck.id}
-                onSelect={() => onDeck(deck.id)}
-              />
-            ))}
-          </div>
+          {stage === "table" ? (
+            <div className="mt-14 flex flex-wrap items-end justify-center gap-x-6 gap-y-8 sm:mt-20 sm:gap-x-12">
+              {decks.map((deck, i) => (
+                <Deck
+                  key={deck.id}
+                  deck={deck}
+                  order={i}
+                  phase={state.deck === deck.id ? state.phase : "idle"}
+                  onSelect={() => onDeck(deck.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <Pile decks={decks} shuffling={stage === "shuffling"} onSelect={openTable} />
+          )}
 
           <p className="mt-8 h-4 font-mono text-[11px] uppercase tracking-[0.24em] text-ivory/45" aria-live="polite">
-            {HINT[state.phase === "idle" && shuffling ? "shuffling" : state.phase]}
+            {HINT[stage === "table" ? state.phase : stage]}
           </p>
 
           <section
@@ -174,20 +183,67 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   );
 }
 
+/** The starting pile: the top card of every deck, stacked. About sits on top. */
+function Pile({ decks, shuffling, onSelect }: { decks: DeckData[]; shuffling: boolean; onSelect: () => void }) {
+  const stack = [...decks].reverse();
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={shuffling}
+      aria-label="Deck of cards. Deal the sections onto the table"
+      className="group mt-14 grid cursor-pointer place-items-center outline-none disabled:cursor-default sm:mt-20"
+    >
+      <div className="grid place-items-center transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1">
+        {stack.map((deck, i) => {
+          const style = DECK_STYLES[deck.id];
+          const top = i === stack.length - 1;
+          const side = i % 2 ? 1 : -1; // alternate halves so the riffle interleaves
+          const offset = i * 2;
+          return (
+            <motion.div
+              key={deck.id}
+              layoutId={deckLayoutId(deck.id)}
+              className={`relative col-start-1 row-start-1 ${SIZE[style.shape].pile} ${top ? HIGHLIGHT : ""}`}
+              style={{
+                borderRadius: CARD_RADIUS,
+                marginTop: -offset * 2,
+                marginLeft: offset * 0.8,
+                zIndex: i,
+                // Landscape cards (Contact) lie sideways in the pile.
+                rotate: style.shape === "landscape" ? 90 : 0,
+              }}
+              animate={
+                shuffling
+                  ? { x: [0, side * 34, side * 34, 0], y: [0, -6, -6, 0] }
+                  : { x: 0, y: 0 }
+              }
+              transition={{ duration: 0.68, times: [0, 0.3, 0.62, 1], ease: "easeInOut", delay: i * 0.03 }}
+            >
+              <CardBack style={style} label={`${deck.label} card`} />
+            </motion.div>
+          );
+        })}
+      </div>
+    </button>
+  );
+}
+
 function Deck({
   deck,
+  order,
   phase,
-  shuffling,
   onSelect,
 }: {
   deck: DeckData;
+  order: number;
   phase: Phase;
-  shuffling: boolean;
   onSelect: () => void;
 }) {
   const style = DECK_STYLES[deck.id];
   const count = deck.cards.length;
   const dealt = phase === "dealt";
+  const flight = spring(order * DECK_STAGGER);
 
   return (
     <button
@@ -197,44 +253,44 @@ function Deck({
       aria-label={`${deck.label} deck, ${count} ${count === 1 ? "card" : "cards"}${dealt ? ", dealt" : ""}`}
       className="group flex cursor-pointer flex-col items-center gap-4 outline-none"
     >
-      <div
-        className={`relative transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 ${SIZE[style.shape].deck}`}
+      {/* Flies in from the starting pile (shared layoutId), turning upright if it lay sideways. */}
+      <motion.div
+        layoutId={deckLayoutId(deck.id)}
+        initial={{ rotate: style.shape === "landscape" ? 90 : 0 }}
+        animate={{ rotate: 0 }}
+        transition={{ layout: flight, rotate: flight }}
+        style={{ borderRadius: CARD_RADIUS }}
       >
-        {/* Empty slot, visible once the deck is dealt out. */}
-        <div className="absolute inset-0 rounded-[10px] border border-dashed border-ivory/20 transition-colors group-hover:border-highlight/70" />
-        {!dealt &&
-          deck.cards.map((card, i) => {
-            const offset = Math.min(i, 7) * 1.5;
-            const top = i === count - 1;
-            const side = i < count / 2 ? -1 : 1;
-            return (
-              <motion.div
-                key={card.id}
-                layoutId={card.id}
-                className={`absolute h-full w-full ${
-                  top
-                    ? "outline-2 outline-offset-[3px] outline-transparent transition-[outline-color,box-shadow] group-hover:shadow-[0_0_22px_rgba(250,204,21,.35)] group-hover:outline-highlight group-focus-visible:shadow-[0_0_22px_rgba(250,204,21,.35)] group-focus-visible:outline-highlight"
-                    : ""
-                }`}
-                style={{ top: -offset, left: offset * 0.4, zIndex: i, borderRadius: CARD_RADIUS }}
-                animate={
-                  shuffling
-                    ? { x: [0, side * 26, side * 26, 0], y: [0, -5, -5, 0], rotate: [0, side * 5, side * 5, 0] }
-                    : { x: 0, y: 0, rotate: 0 }
-                }
-                transition={{
-                  default: { duration: 0.68, times: [0, 0.3, 0.62, 1], ease: "easeInOut", delay: Math.min(i, 7) * 0.018 },
-                  layout: spring(i * COLLECT_STAGGER),
-                }}
-              >
-                <CardBack style={style} label={`${deck.label} card`} />
-              </motion.div>
-            );
-          })}
-      </div>
-      <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-ivory/65 transition-colors group-hover:text-highlight group-focus-visible:text-highlight sm:text-[11px]">
+        <div
+          className={`relative transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 ${SIZE[style.shape].deck}`}
+        >
+          {/* Empty slot, visible once the deck is dealt out. */}
+          <div className="absolute inset-0 rounded-[10px] border border-dashed border-ivory/20 transition-colors group-hover:border-highlight/70" />
+          {!dealt &&
+            deck.cards.map((card, i) => {
+              const offset = Math.min(i, 7) * 1.5;
+              return (
+                <motion.div
+                  key={card.id}
+                  layoutId={card.id}
+                  className={`absolute h-full w-full ${i === count - 1 ? HIGHLIGHT : ""}`}
+                  style={{ top: -offset, left: offset * 0.4, zIndex: i, borderRadius: CARD_RADIUS }}
+                  transition={{ layout: spring(i * COLLECT_STAGGER) }}
+                >
+                  <CardBack style={style} label={`${deck.label} card`} />
+                </motion.div>
+              );
+            })}
+        </div>
+      </motion.div>
+      <motion.span
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: order * DECK_STAGGER + DECK_LANDING, duration: 0.3 }}
+        className="font-mono text-[10px] uppercase tracking-[0.22em] text-ivory/65 transition-colors group-hover:text-highlight group-focus-visible:text-highlight sm:text-[11px]"
+      >
         {deck.label}
-      </span>
+      </motion.span>
     </button>
   );
 }
