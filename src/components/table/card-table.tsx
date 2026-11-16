@@ -4,7 +4,7 @@ import { LayoutGroup, MotionConfig, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CardBack, CardFace } from "./card-faces";
 import { CARD_RADIUS, DECK_STYLES, SIZE } from "./deck-styles";
-import { BOX_TEXT_COLOR, DeckBox, HEADLINE_IDS, OPEN_DURATION, OPEN_SOUNDS, deckLayoutId } from "./deck-box";
+import { BOX_DROP, BOX_TEXT_COLOR, DeckBox, HEADLINE_IDS, OPEN_DURATION, OPEN_SOUNDS, deckLayoutId } from "./deck-box";
 import type { DeckData, DeckId } from "./types";
 import { useCardSounds } from "./use-card-sounds";
 
@@ -16,7 +16,6 @@ type Phase = "idle" | "dealt" | "collecting";
 type TableState = { deck: DeckId | null; phase: Phase };
 
 // Timings, in seconds.
-const BOX_FADE = 0.5; // empty box fades once the decks are out
 const DECK_STAGGER = 0.08; // decks flying out of the box
 const DECK_LANDING = 0.35;
 const DEAL_STAGGER = 0.09;
@@ -30,12 +29,18 @@ const spring = (delay = 0) => ({ type: "spring", stiffness: 240, damping: 28, ma
 const REST_TILT = [-2.5, 1.8, -1.2, 2.4, -1.8, 1.1, -2.1, 1.5];
 const rank = (i: number) => (i === 0 ? "A" : String(i + 1));
 
-// Headline pressed into the felt: raised letters catch light top-left, cast shadow
-// bottom-right. Animated from the box's gold foil so the text visibly sinks into the table.
-const INK = { color: BOX_TEXT_COLOR, textShadow: "0px 0px 0px rgba(255,255,255,0), 0px 0px 0px rgba(0,0,0,0)" };
-const EMBOSS = {
-  color: "#1e5542",
-  textShadow: "-1px -1px 1px rgba(255,255,255,0.2), 2px 3px 4px rgba(0,0,0,0.6)",
+// Headline debossed (pressed into) the felt: letters sit darker than the cloth, with
+// shadow along their top edges and a faint light rim along the bottom, as if lit from
+// above. Animated from the box's print colour so the text visibly sinks into the table.
+const INK = { color: BOX_TEXT_COLOR, textShadow: "0px 0px 0px rgba(0,0,0,0), 0px 0px 0px rgba(255,255,255,0)" };
+const DEBOSS = {
+  color: "#113a2a",
+  textShadow: "0px -2px 2px rgba(0,0,0,0.45), 0px 1.5px 1px rgba(255,255,255,0.13)",
+};
+// Same treatment, scaled down for the small title line.
+const DEBOSS_SMALL = {
+  color: "#113a2a",
+  textShadow: "0px -1px 1px rgba(0,0,0,0.45), 0px 1px 0px rgba(255,255,255,0.12)",
 };
 
 const HINT: Record<Stage | Phase, string> = {
@@ -80,7 +85,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
       setStage("table");
       decks.forEach((_, i) => play("place", i * DECK_STAGGER + DECK_LANDING, 0.5));
     });
-    after(OPEN_DURATION + BOX_FADE, () => setBoxGone(true));
+    after(OPEN_DURATION + BOX_DROP + 0.05, () => setBoxGone(true));
   };
 
   const deal = (id: DeckId) => {
@@ -139,18 +144,18 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
             <div className="flex flex-col items-center">
               <motion.p
                 layoutId={HEADLINE_IDS.name}
-                className="font-display text-7xl leading-none tracking-tight sm:text-[9rem]"
+                className="font-poppins text-6xl font-extrabold leading-none tracking-tight sm:text-8xl"
                 initial={INK}
-                animate={EMBOSS}
+                animate={DEBOSS}
                 transition={{ layout: spring(0), default: { delay: 0.35, duration: 0.6 } }}
               >
                 {name}
               </motion.p>
               <motion.p
                 layoutId={HEADLINE_IDS.title}
-                className="mt-4 font-mono text-xs font-semibold uppercase tracking-[0.36em] sm:mt-6 sm:text-base"
+                className="mt-4 font-poppins text-xs font-semibold uppercase tracking-[0.3em] sm:mt-5 sm:text-base"
                 initial={INK}
-                animate={EMBOSS}
+                animate={DEBOSS_SMALL}
                 transition={{ layout: spring(0.04), default: { delay: 0.4, duration: 0.6 } }}
               >
                 {headline}
@@ -169,7 +174,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
               underneath never moves. */}
           {!boxGone && (
             <div
-              className={`absolute inset-x-0 top-0 flex h-dvh flex-col items-center justify-center gap-14 ${
+              className={`absolute inset-x-0 top-0 flex h-dvh flex-col items-center justify-center gap-14 overflow-hidden ${
                 stage === "table" ? "pointer-events-none" : ""
               }`}
             >
@@ -191,7 +196,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
           )}
 
           {stage === "table" ? (
-            <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 sm:gap-x-12">
+            <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 perspective-[1200px] sm:gap-x-12">
               {decks.map((deck, i) => (
                 <Deck
                   key={deck.id}
@@ -275,9 +280,10 @@ function Deck({
       {/* Flies in from the starting pile (shared layoutId), turning upright if it lay sideways. */}
       <motion.div
         layoutId={deckLayoutId(deck.id)}
-        initial={{ rotate: style.shape === "landscape" ? 90 : 0 }}
-        animate={{ rotate: 0 }}
-        transition={{ layout: flight, rotate: flight }}
+        // Tipped toward the viewer as it leaves the box, then laid flat on the table.
+        initial={{ rotate: style.shape === "landscape" ? 90 : 0, rotateX: 55 }}
+        animate={{ rotate: 0, rotateX: 0 }}
+        transition={{ layout: flight, rotate: flight, rotateX: flight }}
         style={{ borderRadius: CARD_RADIUS }}
       >
         <div
