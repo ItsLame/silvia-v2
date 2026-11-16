@@ -5,12 +5,14 @@ import { posts, projects, profile } from "#content";
 const isProd = process.env.NODE_ENV === "production";
 const visible = <T extends { draft: boolean }>(items: T[]) =>
   items.filter((i) => !isProd || !i.draft);
-const byDateDesc = <T extends { date: string }>(a: T, b: T) =>
-  +new Date(b.date) - +new Date(a.date);
+const byDateDesc = <T extends { date?: string }>(a: T, b: T) =>
+  +new Date(b.date ?? 0) - +new Date(a.date ?? 0);
+const byOrderThenDate = <T extends { order?: number; date?: string }>(a: T, b: T) =>
+  (a.order ?? Infinity) - (b.order ?? Infinity) || byDateDesc(a, b);
 
 export const getProfile = () => profile;
 
-export const getProjects = () => visible(projects).sort(byDateDesc);
+export const getProjects = () => visible(projects).sort(byOrderThenDate);
 export const getFeaturedProjects = () => getProjects().filter((p) => p.featured);
 export const getProject = (slug: string) => getProjects().find((p) => p.slug === slug);
 

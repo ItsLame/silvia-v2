@@ -26,7 +26,9 @@ const projects = defineCollection({
       title: s.string().max(120),
       slug: s.path(),
       description: s.string().max(280),
-      date: s.isodate(),
+      // Manual position (1 = first). Projects without one sort after, newest first.
+      order: s.number().int().positive().optional(),
+      date: s.isodate().optional(),
       featured: s.boolean().default(false),
       draft: s.boolean().default(false),
       tags: s.array(s.string()).default([]),
