@@ -1,17 +1,24 @@
 {
-  "name": "website-v2",
+  "name": "silvia-v2",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "content": "velite build --strict",
+    "predev": "velite build --strict",
+    "prebuild": "velite build --strict",
+    "typecheck": "velite build --strict && tsc --noEmit"
   },
   "dependencies": {
     "next": "16.4.6",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "rehype-pretty-code": "^0.14.6",
+    "shiki": "^4.6.0",
+    "velite": "^0.4.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",
@@ -23,5 +30,8 @@
     "tailwindcss": "4.3.3",
     "typescript": "^5"
   },
-  "packageManager": "pnpm@12.15.0"
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=24"
+  }
 }
