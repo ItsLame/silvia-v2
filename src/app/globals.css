@@ -4,6 +4,7 @@
   --font-display: var(--font-instrument-serif);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-poppins: var(--font-poppins-src);
 }
 
 @theme {
@@ -13,6 +14,39 @@
   --color-ink: #1f1b16;
   --color-suit-red: #b3261e;
   --color-highlight: #facc15;
+
+  /* v1 palette (silviatan.com), used by the business card */
+  --color-v1-cream: #fdfae5;
+  --color-v1-ink: #171717;
+  --color-v1-red: #dc2626;
+  --color-v1-red-deep: #991b1b;
+}
+
+/* Deck box: one outline around the whole box (its silhouette), plus the shadow it
+   casts on the felt. Four offset drop-shadows trace the outline. The colours
+   are registered so they can transition on hover. */
+@property --deck-outline {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --deck-glow {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+.deck-box {
+  filter: drop-shadow(2.5px 0 0 var(--deck-outline)) drop-shadow(-2.5px 0 0 var(--deck-outline))
+    drop-shadow(0 2.5px 0 var(--deck-outline)) drop-shadow(0 -2.5px 0 var(--deck-outline))
+    drop-shadow(0 0 16px var(--deck-glow)) drop-shadow(6px 14px 12px rgb(0 0 0 / 0.45));
+  transition:
+    --deck-outline 0.2s,
+    --deck-glow 0.2s;
+}
+button:enabled:hover > .deck-box,
+button:enabled:focus-visible > .deck-box {
+  --deck-outline: var(--color-highlight);
+  --deck-glow: rgb(250 204 21 / 0.35);
 }
 
 body {

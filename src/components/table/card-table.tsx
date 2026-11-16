@@ -4,18 +4,20 @@ import { LayoutGroup, MotionConfig, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CardBack, CardFace } from "./card-faces";
 import { CARD_RADIUS, DECK_STYLES, SIZE } from "./deck-styles";
+import { BOX_TEXT_COLOR, DeckBox, HEADLINE_IDS, OPEN_DURATION, OPEN_SOUNDS, deckLayoutId } from "./deck-box";
 import type { DeckData, DeckId } from "./types";
 import { useCardSounds } from "./use-card-sounds";
 
-// Start: one pile (a card from each deck). Click → it shuffles and lays out the decks.
-type Stage = "pile" | "shuffling" | "table";
+// Start: a deck box with the name on it. Click → it opens, the section cards slide out
+// and are laid out as decks; the name settles into the table.
+type Stage = "box" | "opening" | "table";
 // Then, per deck: idle → dealt → collecting → idle.
 type Phase = "idle" | "dealt" | "collecting";
 type TableState = { deck: DeckId | null; phase: Phase };
 
 // Timings, in seconds.
-const SHUFFLE = 0.85; // riffle length incl. per-card stagger
-const DECK_STAGGER = 0.08; // decks flying out of the pile
+const BOX_FADE = 0.5; // empty box fades once the decks are out
+const DECK_STAGGER = 0.08; // decks flying out of the box
 const DECK_LANDING = 0.35;
 const DEAL_STAGGER = 0.09;
 const LANDING = 0.4; // roughly when a dealt card settles after it starts flying
@@ -27,11 +29,18 @@ const spring = (delay = 0) => ({ type: "spring", stiffness: 240, damping: 28, ma
 // Deterministic "tossed onto the table" tilt; random values would break prerendering.
 const REST_TILT = [-2.5, 1.8, -1.2, 2.4, -1.8, 1.1, -2.1, 1.5];
 const rank = (i: number) => (i === 0 ? "A" : String(i + 1));
-const deckLayoutId = (id: DeckId) => `deck-${id}`;
+
+// Headline pressed into the felt: raised letters catch light top-left, cast shadow
+// bottom-right. Animated from the box's gold foil so the text visibly sinks into the table.
+const INK = { color: BOX_TEXT_COLOR, textShadow: "0px 0px 0px rgba(255,255,255,0), 0px 0px 0px rgba(0,0,0,0)" };
+const EMBOSS = {
+  color: "#1e5542",
+  textShadow: "-1px -1px 1px rgba(255,255,255,0.2), 2px 3px 4px rgba(0,0,0,0.6)",
+};
 
 const HINT: Record<Stage | Phase, string> = {
-  pile: "Click the deck to deal",
-  shuffling: "Shuffling…",
+  box: "Click the box to open",
+  opening: "",
   table: "",
   idle: "Pick a deck",
   dealt: "Click the deck again or press Esc to gather",
@@ -42,7 +51,8 @@ const HIGHLIGHT =
   "outline-2 outline-offset-[3px] outline-transparent transition-[outline-color,box-shadow] group-hover:shadow-[0_0_22px_rgba(250,204,21,.35)] group-hover:outline-highlight group-focus-visible:shadow-[0_0_22px_rgba(250,204,21,.35)] group-focus-visible:outline-highlight";
 
 export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
-  const [stage, setStage] = useState<Stage>("pile");
+  const [stage, setStage] = useState<Stage>("box");
+  const [boxGone, setBoxGone] = useState(false);
   const [state, setState] = useState<TableState>({ deck: null, phase: "idle" });
   const stateRef = useRef(state);
   const timers = useRef<number[]>([]);
@@ -61,13 +71,16 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
 
   const openTable = () => {
     unlock();
-    if (stage !== "pile") return;
-    setStage("shuffling");
-    play("shuffle");
-    after(SHUFFLE, () => {
+    if (stage !== "box") return;
+    setStage("opening");
+    // Lid flips open, the cards slide out, then each deck lands on the table.
+    play("take", OPEN_SOUNDS.lid, 0.4);
+    play("take", OPEN_SOUNDS.cards, 0.5);
+    after(OPEN_DURATION, () => {
       setStage("table");
       decks.forEach((_, i) => play("place", i * DECK_STAGGER + DECK_LANDING, 0.5));
     });
+    after(OPEN_DURATION + BOX_FADE, () => setBoxGone(true));
   };
 
   const deal = (id: DeckId) => {
@@ -118,16 +131,67 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   return (
     <MotionConfig reducedMotion="user">
       <LayoutGroup>
-        <main className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col items-center px-4 pb-20 pt-16 sm:pt-24">
-          <MuteToggle muted={muted} onToggle={toggleMuted} />
+        {/* Headline embossed into the middle of the table, like a logo printed on the
+            felt. Fixed behind everything, so it takes no layout space; the text arrives
+            from the deck box. */}
+        {stage === "table" && (
+          <div className="pointer-events-none fixed inset-0 grid place-items-center px-4 text-center" aria-hidden>
+            <div className="flex flex-col items-center">
+              <motion.p
+                layoutId={HEADLINE_IDS.name}
+                className="font-display text-7xl leading-none tracking-tight sm:text-[9rem]"
+                initial={INK}
+                animate={EMBOSS}
+                transition={{ layout: spring(0), default: { delay: 0.35, duration: 0.6 } }}
+              >
+                {name}
+              </motion.p>
+              <motion.p
+                layoutId={HEADLINE_IDS.title}
+                className="mt-4 font-mono text-xs font-semibold uppercase tracking-[0.36em] sm:mt-6 sm:text-base"
+                initial={INK}
+                animate={EMBOSS}
+                transition={{ layout: spring(0.04), default: { delay: 0.4, duration: 0.6 } }}
+              >
+                {headline}
+              </motion.p>
+            </div>
+          </div>
+        )}
 
-          <header className="text-center">
-            <h1 className="font-display text-6xl leading-none tracking-tight sm:text-8xl">{name}</h1>
-            <p className="mt-4 font-mono text-xs uppercase tracking-[0.32em] text-ivory/60 sm:text-sm">{headline}</p>
-          </header>
+        <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col items-center px-4 pb-20 pt-16 sm:pt-20">
+          <MuteToggle muted={muted} onToggle={toggleMuted} />
+          <h1 className="sr-only">
+            {name}, {headline}
+          </h1>
+
+          {/* Deck box, centred in the first screen. Overlaid so the table layout
+              underneath never moves. */}
+          {!boxGone && (
+            <div
+              className={`absolute inset-x-0 top-0 flex h-dvh flex-col items-center justify-center gap-14 ${
+                stage === "table" ? "pointer-events-none" : ""
+              }`}
+            >
+              <DeckBox
+                name={name}
+                headline={headline}
+                decks={decks}
+                stage={stage === "box" ? "closed" : stage === "opening" ? "opening" : "leaving"}
+                onSelect={openTable}
+              />
+              <p
+                className={`h-4 font-mono text-[11px] uppercase tracking-[0.24em] text-ivory/45 transition-opacity ${
+                  stage === "box" ? "" : "opacity-0"
+                }`}
+              >
+                {HINT.box}
+              </p>
+            </div>
+          )}
 
           {stage === "table" ? (
-            <div className="mt-14 flex flex-wrap items-end justify-center gap-x-6 gap-y-8 sm:mt-20 sm:gap-x-12">
+            <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 sm:gap-x-12">
               {decks.map((deck, i) => (
                 <Deck
                   key={deck.id}
@@ -139,11 +203,12 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
               ))}
             </div>
           ) : (
-            <Pile decks={decks} shuffling={stage === "shuffling"} onSelect={openTable} />
+            // Placeholder keeps the decks row's height so the table doesn't jump.
+            <div className="h-[150px] sm:h-[200px]" />
           )}
 
-          <p className="mt-8 h-4 font-mono text-[11px] uppercase tracking-[0.24em] text-ivory/45" aria-live="polite">
-            {HINT[stage === "table" ? state.phase : stage]}
+          <p className="mt-8 min-h-4 text-center font-mono text-[11px] uppercase tracking-[0.24em] text-ivory/45" aria-live="polite">
+            {stage === "table" ? HINT[state.phase] : ""}
           </p>
 
           <section
@@ -180,52 +245,6 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
         </main>
       </LayoutGroup>
     </MotionConfig>
-  );
-}
-
-/** The starting pile: the top card of every deck, stacked. About sits on top. */
-function Pile({ decks, shuffling, onSelect }: { decks: DeckData[]; shuffling: boolean; onSelect: () => void }) {
-  const stack = [...decks].reverse();
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={shuffling}
-      aria-label="Deck of cards. Deal the sections onto the table"
-      className="group mt-14 grid cursor-pointer place-items-center outline-none disabled:cursor-default sm:mt-20"
-    >
-      <div className="grid place-items-center transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1">
-        {stack.map((deck, i) => {
-          const style = DECK_STYLES[deck.id];
-          const top = i === stack.length - 1;
-          const side = i % 2 ? 1 : -1; // alternate halves so the riffle interleaves
-          const offset = i * 2;
-          return (
-            <motion.div
-              key={deck.id}
-              layoutId={deckLayoutId(deck.id)}
-              className={`relative col-start-1 row-start-1 ${SIZE[style.shape].pile} ${top ? HIGHLIGHT : ""}`}
-              style={{
-                borderRadius: CARD_RADIUS,
-                marginTop: -offset * 2,
-                marginLeft: offset * 0.8,
-                zIndex: i,
-                // Landscape cards (Contact) lie sideways in the pile.
-                rotate: style.shape === "landscape" ? 90 : 0,
-              }}
-              animate={
-                shuffling
-                  ? { x: [0, side * 34, side * 34, 0], y: [0, -6, -6, 0] }
-                  : { x: 0, y: 0 }
-              }
-              transition={{ duration: 0.68, times: [0, 0.3, 0.62, 1], ease: "easeInOut", delay: i * 0.03 }}
-            >
-              <CardBack style={style} label={`${deck.label} card`} />
-            </motion.div>
-          );
-        })}
-      </div>
-    </button>
   );
 }
 

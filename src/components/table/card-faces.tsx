@@ -113,14 +113,18 @@ export function CardBack({ style, label }: { style: DeckStyle; label: string }) 
   };
   const isLight = style.shape === "landscape";
   return (
+    // pointer-events-none: on a dealt card the back sits in the same plane as the face,
+    // and must not swallow clicks meant for links on the face.
     <div
-      className={`${face} p-[6%] shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_2px_6px_rgba(0,0,0,.35)]`}
+      className={`${face} pointer-events-none p-[6%] shadow-[0_1px_0_rgba(255,255,255,.12)_inset,0_2px_6px_rgba(0,0,0,.35)]`}
       style={{ background: style.back }}
     >
       <div className="grid h-full w-full place-items-center rounded-[6px] border" style={lattice}>
         <span
-          className={`grid aspect-square w-[42%] max-w-12 place-items-center rounded-full border font-display text-[clamp(14px,3.2vw,26px)] leading-none ${
-            isLight ? "text-ink/70" : "text-ivory/85"
+          className={`grid aspect-square w-[42%] max-w-12 place-items-center rounded-full border leading-none ${
+            isLight
+              ? "font-poppins text-[clamp(12px,2.6vw,20px)] font-extrabold text-v1-red"
+              : "font-display text-[clamp(14px,3.2vw,26px)] text-ivory/85"
           }`}
           style={{ background: style.back, borderColor: style.trim }}
           aria-hidden
@@ -129,6 +133,90 @@ export function CardBack({ style, label }: { style: DeckStyle; label: string }) 
         </span>
       </div>
       <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+
+// --- Business card: v1 (silviatan.com) look — Poppins, cream, red name ------------
+// Tabler icons (MIT), as used on v1's contact page.
+const ICON_PATHS: Record<string, ReactNode> = {
+  mail: (
+    <>
+      <path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+      <path d="M3 7l9 6 9-6" />
+    </>
+  ),
+  linkedin: (
+    <>
+      <path d="M8 11v5M8 8v.01M12 16v-5M16 16v-3a2 2 0 1 0-4 0" />
+      <path d="M3 7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7z" />
+    </>
+  ),
+  github: (
+    <path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21" />
+  ),
+  external: (
+    <>
+      <path d="M12 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+      <path d="M11 13l9-9M15 4h5v5" />
+    </>
+  ),
+};
+
+function Icon({ name, className = "size-4 text-v1-red sm:size-[18px]" }: { name: string; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`shrink-0 ${className}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+// "https://github.com/ItsLame" → "itslame", like v1 shows its handles.
+const handle = (url: string) => url.replace(/\/+$/, "").split("/").pop()!.toLowerCase();
+
+// One contact line: icon, handle, and an external-link mark. Opens in a new tab.
+function ContactLink({ href, icon, label, text }: { href: string; icon: string; label: string; text: string }) {
+  return (
+    <li>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`${label}: ${text} (opens in a new tab)`}
+        className="group/link inline-flex items-center gap-2.5 rounded-sm transition-colors hover:text-v1-red focus-visible:text-v1-red focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v1-red"
+      >
+        <Icon name={icon} />
+        <span className="underline-offset-2 group-hover/link:underline">{text}</span>
+        <Icon name="external" className="size-3 text-v1-ink/40 group-hover/link:text-v1-red sm:size-3.5" />
+      </a>
+    </li>
+  );
+}
+
+function BusinessCard({ card }: { card: Extract<CardData, { kind: "contact" }> }) {
+  return (
+    <div
+      className={`${face} rotate-y-180 flex flex-col justify-between overflow-hidden bg-v1-cream p-5 font-poppins text-v1-ink shadow-[0_2px_8px_rgba(0,0,0,.35)] sm:p-6`}
+    >
+      <div>
+        <p className="text-[26px] font-extrabold leading-none text-v1-red sm:text-[32px]">{card.name}</p>
+        <p className="mt-2.5 text-xs font-semibold text-v1-red-deep sm:text-sm">{card.headline}</p>
+      </div>
+      <ul className="space-y-1.5 text-[11px] sm:text-xs">
+        {card.email && <ContactLink href={`mailto:${card.email}`} icon="mail" label="Email" text={card.email} />}
+        {card.socials.map((s) => (
+          <ContactLink key={s.url} href={s.url} icon={s.label.toLowerCase()} label={s.label} text={handle(s.url)} />
+        ))}
+      </ul>
     </div>
   );
 }
@@ -161,37 +249,17 @@ export function CardFace({
   if (style.variant === "uno") return <UnoFace card={card} index={index} />;
   const base = `${face} rotate-y-180 overflow-hidden bg-ivory text-ink shadow-[0_2px_8px_rgba(0,0,0,.35)]`;
 
-  if (card.kind === "contact") {
-    return (
-      <div className={`${base} flex flex-col justify-between p-5 sm:p-6`}>
-        <div>
-          <p className="font-display text-3xl leading-none sm:text-4xl">{card.name}</p>
-          <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.18em] text-ink/60">{card.headline}</p>
-        </div>
-        <ul className="space-y-1 font-mono text-[11px] text-ink/80">
-          {card.socials.map((s) => (
-            <li key={s.url} className="flex gap-3">
-              <span className="w-16 text-ink/45">{s.label}</span>
-              <span className="truncate">{s.url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</span>
-            </li>
-          ))}
-        </ul>
-        <span className="absolute right-5 top-5 font-display text-2xl text-ink/25 sm:right-6 sm:top-6" aria-hidden>
-          ✦
-        </span>
-      </div>
-    );
-  }
+  if (card.kind === "contact") return <BusinessCard card={card} />;
 
   if (card.kind === "project") {
     return (
       <div className={`${base} flex flex-col px-4 pb-4 pt-9 sm:px-5`}>
         <Index style={style} rank={rank} />
         <p className="font-display text-xl leading-tight sm:text-2xl">{card.title}</p>
-        <p className="mt-2 line-clamp-4 text-[11px] leading-snug text-ink/70 sm:line-clamp-5 sm:text-xs">
+        <p className="mt-2 line-clamp-3 text-[11px] leading-snug text-ink/70 sm:line-clamp-5 sm:text-xs">
           {card.description}
         </p>
-        <ul className="mt-auto flex flex-wrap gap-1">
+        <ul className="mt-auto flex max-h-[22px] flex-wrap gap-1 overflow-hidden pt-0.5 sm:max-h-none">
           {card.tags.slice(0, 4).map((t) => (
             <li key={t} className="rounded-full border border-ink/15 px-1.5 py-0.5 font-mono text-[9px] text-ink/60">
               {t}

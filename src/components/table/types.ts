@@ -8,6 +8,7 @@ export type CardData =
       id: string;
       name: string;
       headline: string;
+      email?: string;
       socials: { label: string; url: string }[];
     };
 

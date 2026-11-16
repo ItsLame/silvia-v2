@@ -14,21 +14,23 @@ export const DECK_STYLES: Record<DeckId, DeckStyle> = {
   about: { suit: "♥", red: true, back: "#7d2130", trim: "rgba(245,226,190,.38)", shape: "portrait" },
   work: { suit: "♠", red: false, back: "#1d3557", trim: "rgba(214,228,245,.34)", shape: "portrait" },
   projects: { suit: "♦", red: true, back: "#4a2c5e", trim: "rgba(236,214,245,.34)", shape: "portrait" },
-  contact: { suit: "✦", red: false, back: "#ece4d2", trim: "rgba(31,27,22,.22)", shape: "landscape" },
+  // v1 palette: cream card, red lattice and monogram.
+  contact: { suit: "✦", red: false, back: "#fdfae5", trim: "rgba(220,38,38,.3)", shape: "landscape" },
   games: { suit: "♣", red: false, back: "#111111", trim: "#ffffff", shape: "portrait", variant: "uno" },
 };
 
-// Card sizes. Pile = the single starting deck. Deck = small, on the table edge.
-// Dealt = larger, laid out to read. Landscape pile cards lie sideways, so their
-// width roughly matches the portrait pile card's height.
+// Card sizes. Pile = inside the starting deck (same size as its cover). Deck = small,
+// on the table edge. Dealt = larger, laid out to read. Landscape pile cards lie
+// sideways, so their width roughly matches the cover's height.
+export const COVER_SIZE = "w-[200px] sm:w-[240px] aspect-[5/7]";
 export const SIZE = {
   portrait: {
-    pile: "w-[96px] sm:w-[128px] aspect-[5/7]",
+    pile: COVER_SIZE,
     deck: "w-[76px] sm:w-[104px] aspect-[5/7]",
     dealt: "w-[148px] sm:w-[184px] aspect-[5/7]",
   },
   landscape: {
-    pile: "w-[128px] sm:w-[170px] aspect-[7/4]",
+    pile: "w-[272px] sm:w-[328px] aspect-[7/4]",
     deck: "w-[108px] sm:w-[148px] aspect-[7/4]",
     dealt: "w-[300px] sm:w-[360px] aspect-[7/4]",
   },

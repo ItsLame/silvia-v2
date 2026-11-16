@@ -34,6 +34,7 @@ export function getDecks(): DeckData[] {
           id: "contact-card",
           name: profile.name,
           headline: profile.headline,
+          email: profile.email,
           socials: profile.socials,
         },
       ],
