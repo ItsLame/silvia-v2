@@ -4,7 +4,7 @@ import { LayoutGroup, MotionConfig, motion } from "motion/react";
 import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CardBack, CardFace } from "./card-faces";
 import { CARD_RADIUS, DECK_STYLES, SIZE } from "./deck-styles";
-import { BOX_DROP, BOX_TEXT_COLOR, BOX_VIEW, DeckBox, HEADLINE_IDS, OPEN_DURATION, OPEN_SOUNDS } from "./deck-box";
+import { BOX_DROP, BOX_TEXT_COLOR, DeckBox, HEADLINE_IDS, OPEN_DELAY } from "./deck-box";
 import type { DeckData, DeckId } from "./types";
 import { useCardSounds } from "./use-card-sounds";
 
@@ -16,8 +16,10 @@ type Phase = "idle" | "dealt" | "collecting";
 type TableState = { deck: DeckId | null; phase: Phase };
 
 // Timings, in seconds.
-const DECK_STAGGER = 0.08; // decks flying out of the box
-const DECK_LANDING = 0.35;
+// Card stream out of the box (Slay the Spire style): small card backs fly in staggered,
+// spinning arcs to their decks, growing to deck size as they land.
+const STREAM_STEP = 0.05; // between one card launching and the next
+const STREAM_FLIGHT = 0.6;
 const DEAL_STAGGER = 0.09;
 const LANDING = 0.4; // roughly when a dealt card settles after it starts flying
 const FLIP = 0.45;
@@ -58,11 +60,12 @@ const HIGHLIGHT =
 export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
   const [stage, setStage] = useState<Stage>("box");
   const [boxGone, setBoxGone] = useState(false);
-  // Where each section card sits on screen as it leaves the box; its deck starts there.
-  const boxCards = useRef(new Map<DeckId, HTMLElement>());
-  const [origins, setOrigins] = useState<Map<DeckId, DOMRect> | null>(null);
+  // The box's opening (cards stream out from there) and each deck's slot (they land there).
+  const boxOpening = useRef<HTMLDivElement>(null);
+  const [streamFrom, setStreamFrom] = useState<{ x: number; y: number } | null>(null);
   const deckSlots = useRef(new Map<DeckId, HTMLElement>());
   const [landed, setLanded] = useState<Set<DeckId>>(new Set());
+  const [streamDone, setStreamDone] = useState(false);
   const [state, setState] = useState<TableState>({ deck: null, phase: "idle" });
   const stateRef = useRef(state);
   const timers = useRef<number[]>([]);
@@ -84,14 +87,16 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     if (stage !== "box") return;
     setStage("opening");
     // Lid flips open, the cards slide out, then each deck lands on the table.
-    play("take", OPEN_SOUNDS.lid, 0.4);
-    play("take", OPEN_SOUNDS.cards, 0.5);
-    after(OPEN_DURATION, () => {
-      setOrigins(new Map([...boxCards.current].map(([id, el]) => [id, el.getBoundingClientRect()])));
+    play("take", 0, 0.45);
+    // Measured now, before the box moves: the stream keeps coming from where it was.
+    const r = boxOpening.current?.getBoundingClientRect();
+    if (r) setStreamFrom({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    // Then straight away: the box drops off the table and the cards stream out.
+    after(OPEN_DELAY, () => {
       setStage("table");
-      decks.forEach((_, i) => play("place", i * DECK_STAGGER + DECK_LANDING, 0.5));
+      play("shuffle", 0.05, 0.6);
     });
-    after(OPEN_DURATION + BOX_DROP + 0.05, () => setBoxGone(true));
+    after(OPEN_DELAY + BOX_DROP + 0.05, () => setBoxGone(true));
   };
 
   const deal = (id: DeckId) => {
@@ -187,10 +192,9 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
               <DeckBox
                 name={name}
                 headline={headline}
-                decks={decks}
                 stage={stage === "box" ? "closed" : stage === "opening" ? "opening" : "leaving"}
                 onSelect={openTable}
-                cardRefs={boxCards}
+                openingRef={boxOpening}
               />
               <p
                 className={`h-4 font-mono text-xs uppercase tracking-[0.24em] text-ivory/50 transition-opacity sm:text-sm ${
@@ -204,13 +208,12 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
 
           {stage === "table" ? (
             <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 perspective-[1400px] sm:gap-x-14">
-              {decks.map((deck, i) => (
+              {decks.map((deck) => (
                 <Deck
                   key={deck.id}
                   deck={deck}
-                  order={i}
                   phase={state.deck === deck.id ? state.phase : "idle"}
-                  hidden={!!origins && !landed.has(deck.id)}
+                  hidden={!!streamFrom && !streamDone && !landed.has(deck.id)}
                   slotRef={(el) => {
                     if (el) deckSlots.current.set(deck.id, el);
                     else deckSlots.current.delete(deck.id);
@@ -224,12 +227,16 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
             <div className="h-[180px] sm:h-[250px]" />
           )}
 
-          {stage === "table" && origins && landed.size < decks.length && (
-            <DeckFlights
+          {stage === "table" && streamFrom && !streamDone && (
+            <CardStream
               decks={decks}
-              origins={origins}
+              from={streamFrom}
               slots={deckSlots}
-              onLand={(id) => setLanded((prev) => new Set(prev).add(id))}
+              onLand={(id) => {
+                play("place", 0, 0.22);
+                setLanded((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+              }}
+              onDone={() => setStreamDone(true)}
             />
           )}
 
@@ -275,60 +282,76 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
 }
 
 /**
- * The hand-off from the box to the table: a stand-in card per deck flies from where
- * its card was pulled out of the box (same place, size and 3D angle) to that deck's
- * slot, shrinking and laying flat. The real decks wait, hidden, in their slots and
- * appear as each stand-in lands, so they never move themselves (moving them would
- * fight the layout animations their cards use for dealing). Measured by hand because
- * shared-layout animation can't measure the 3D box.
+ * The hand-off from the box to the table, after Slay the Spire's pile shuffles: one
+ * small card back per card in each deck streams out of the box opening in a quick,
+ * spinning arc, dealt round-robin across the decks, and grows to deck size as it lands
+ * on its slot. A deck appears when its first card lands. The real decks never move
+ * (moving them would fight the layout animations their cards use for dealing).
  */
-function DeckFlights({
+function CardStream({
   decks,
-  origins,
+  from,
   slots,
   onLand,
+  onDone,
 }: {
   decks: DeckData[];
-  origins: Map<DeckId, DOMRect>;
+  from: { x: number; y: number };
   slots: RefObject<Map<DeckId, HTMLElement>>;
   onLand: (id: DeckId) => void;
+  onDone: () => void;
 }) {
   const [targets, setTargets] = useState<Map<DeckId, DOMRect> | null>(null);
+  const landedCount = useRef(0);
   // Slots exist by now (rendered in the same commit). Measuring layout and re-rendering
-  // before paint is exactly what useLayoutEffect is for, so no frame shows the
-  // stand-ins in the wrong place.
+  // before paint is exactly what useLayoutEffect is for, so no frame shows the cards
+  // in the wrong place.
   useLayoutEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTargets(new Map([...slots.current].map(([id, el]) => [id, el.getBoundingClientRect()])));
   }, [slots]);
   if (!targets) return null;
 
+  // Round-robin: one card to each deck in turn, so the stream fans across the table.
+  const flights: { deck: DeckData; n: number }[] = [];
+  const rounds = Math.max(...decks.map((d) => d.cards.length));
+  for (let n = 0; n < rounds; n++) for (const deck of decks) if (n < deck.cards.length) flights.push({ deck, n });
+
   return (
-    <div className="pointer-events-none fixed inset-0 z-30 perspective-[1400px]" aria-hidden>
-      {/* Back to front, so About (the box's front card) stays on top. */}
-      {[...decks].reverse().map((deck) => {
-        const order = decks.indexOf(deck);
-        const from = origins.get(deck.id);
+    <div className="pointer-events-none fixed inset-0 z-30" aria-hidden>
+      {flights.map(({ deck, n }, i) => {
         const to = targets.get(deck.id);
-        if (!from || !to) return null;
+        if (!to) return null;
         const style = DECK_STYLES[deck.id];
-        const landscape = style.shape === "landscape";
+        // Start offset (box opening relative to the slot's centre), and an arc that
+        // bulges upward, perpendicular to the straight line.
+        const sx = from.x - (to.left + to.width / 2);
+        const sy = from.y - (to.top + to.height / 2);
+        const len = Math.hypot(sx, sy) || 1;
+        let px = (-sy / len) * Math.min(140, len * 0.35);
+        let py = (sx / len) * Math.min(140, len * 0.35);
+        if (py > 0) [px, py] = [-px, -py];
+        const spin = (i % 2 ? 1 : -1) * (200 + ((i * 47) % 160)); // deterministic variety
+        const last = i === flights.length - 1;
         return (
           <motion.div
-            key={deck.id}
+            key={`${deck.id}-${n}`}
             className="absolute"
             style={{ left: to.left, top: to.top, width: to.width, height: to.height, borderRadius: CARD_RADIUS }}
-            initial={{
-              x: from.left + from.width / 2 - (to.left + to.width / 2),
-              y: from.top + from.height / 2 - (to.top + to.height / 2),
-              scale: (landscape ? from.height : from.width) / to.width,
-              rotate: landscape ? 90 : 0,
-              rotateX: BOX_VIEW.rotateX,
-              rotateY: BOX_VIEW.rotateY,
+            initial={{ x: sx, y: sy, scale: 0.3, rotate: spin, opacity: 0 }}
+            animate={{
+              x: [sx, sx / 2 + px, 0],
+              y: [sy, sy / 2 + py, 0],
+              scale: [0.3, 0.55, 1],
+              rotate: [spin, spin * 0.35, 0],
+              opacity: [0, 1, 1],
             }}
-            animate={{ x: 0, y: 0, scale: 1, rotate: 0, rotateX: 0, rotateY: 0 }}
-            transition={{ type: "spring", stiffness: 150, damping: 22, delay: order * DECK_STAGGER }}
-            onAnimationComplete={() => onLand(deck.id)}
+            transition={{ duration: STREAM_FLIGHT, delay: i * STREAM_STEP, times: [0, 0.5, 1], ease: "easeInOut" }}
+            onAnimationComplete={() => {
+              onLand(deck.id);
+              landedCount.current += 1;
+              if (last || landedCount.current === flights.length) onDone();
+            }}
           >
             <CardBack style={style} label={`${deck.label} card`} />
           </motion.div>
@@ -340,16 +363,14 @@ function DeckFlights({
 
 function Deck({
   deck,
-  order,
   phase,
   hidden,
   slotRef,
   onSelect,
 }: {
   deck: DeckData;
-  order: number;
   phase: Phase;
-  hidden: boolean; // still in flight from the box (see DeckFlights)
+  hidden: boolean; // its first card hasn't landed yet (see CardStream)
   slotRef: (el: HTMLDivElement | null) => void;
   onSelect: () => void;
 }) {
@@ -391,8 +412,8 @@ function Deck({
       </div>
       <motion.span
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: order * DECK_STAGGER + DECK_LANDING, duration: 0.3 }}
+        animate={{ opacity: hidden ? 0 : 1 }}
+        transition={{ duration: 0.3 }}
         className="font-mono text-xs uppercase tracking-[0.22em] text-ivory/70 transition-colors group-hover:text-highlight group-focus-visible:text-highlight sm:text-sm"
       >
         {deck.label}
