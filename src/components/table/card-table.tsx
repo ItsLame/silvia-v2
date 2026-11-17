@@ -1,10 +1,10 @@
 "use client";
 
 import { LayoutGroup, MotionConfig, motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CardBack, CardFace } from "./card-faces";
 import { CARD_RADIUS, DECK_STYLES, SIZE } from "./deck-styles";
-import { BOX_DROP, BOX_TEXT_COLOR, DeckBox, HEADLINE_IDS, OPEN_DURATION, OPEN_SOUNDS, deckLayoutId } from "./deck-box";
+import { BOX_DROP, BOX_TEXT_COLOR, BOX_VIEW, DeckBox, HEADLINE_IDS, OPEN_DURATION, OPEN_SOUNDS } from "./deck-box";
 import type { DeckData, DeckId } from "./types";
 import { useCardSounds } from "./use-card-sounds";
 
@@ -58,6 +58,11 @@ const HIGHLIGHT =
 export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
   const [stage, setStage] = useState<Stage>("box");
   const [boxGone, setBoxGone] = useState(false);
+  // Where each section card sits on screen as it leaves the box; its deck starts there.
+  const boxCards = useRef(new Map<DeckId, HTMLElement>());
+  const [origins, setOrigins] = useState<Map<DeckId, DOMRect> | null>(null);
+  const deckSlots = useRef(new Map<DeckId, HTMLElement>());
+  const [landed, setLanded] = useState<Set<DeckId>>(new Set());
   const [state, setState] = useState<TableState>({ deck: null, phase: "idle" });
   const stateRef = useRef(state);
   const timers = useRef<number[]>([]);
@@ -82,6 +87,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     play("take", OPEN_SOUNDS.lid, 0.4);
     play("take", OPEN_SOUNDS.cards, 0.5);
     after(OPEN_DURATION, () => {
+      setOrigins(new Map([...boxCards.current].map(([id, el]) => [id, el.getBoundingClientRect()])));
       setStage("table");
       decks.forEach((_, i) => play("place", i * DECK_STAGGER + DECK_LANDING, 0.5));
     });
@@ -144,7 +150,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
             <div className="flex flex-col items-center">
               <motion.p
                 layoutId={HEADLINE_IDS.name}
-                className="font-poppins text-6xl font-extrabold leading-none tracking-tight sm:text-8xl"
+                className="font-poppins text-6xl font-extrabold leading-none tracking-tight sm:text-9xl"
                 initial={INK}
                 animate={DEBOSS}
                 transition={{ layout: spring(0), default: { delay: 0.35, duration: 0.6 } }}
@@ -153,7 +159,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
               </motion.p>
               <motion.p
                 layoutId={HEADLINE_IDS.title}
-                className="mt-4 font-poppins text-xs font-semibold uppercase tracking-[0.3em] sm:mt-5 sm:text-base"
+                className="mt-4 font-poppins text-sm font-semibold uppercase tracking-[0.3em] sm:mt-6 sm:text-lg"
                 initial={INK}
                 animate={DEBOSS_SMALL}
                 transition={{ layout: spring(0.04), default: { delay: 0.4, duration: 0.6 } }}
@@ -184,9 +190,10 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
                 decks={decks}
                 stage={stage === "box" ? "closed" : stage === "opening" ? "opening" : "leaving"}
                 onSelect={openTable}
+                cardRefs={boxCards}
               />
               <p
-                className={`h-4 font-mono text-[11px] uppercase tracking-[0.24em] text-ivory/45 transition-opacity ${
+                className={`h-4 font-mono text-xs uppercase tracking-[0.24em] text-ivory/50 transition-opacity sm:text-sm ${
                   stage === "box" ? "" : "opacity-0"
                 }`}
               >
@@ -196,30 +203,44 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
           )}
 
           {stage === "table" ? (
-            <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 perspective-[1200px] sm:gap-x-12">
+            <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 perspective-[1400px] sm:gap-x-14">
               {decks.map((deck, i) => (
                 <Deck
                   key={deck.id}
                   deck={deck}
                   order={i}
                   phase={state.deck === deck.id ? state.phase : "idle"}
+                  hidden={!!origins && !landed.has(deck.id)}
+                  slotRef={(el) => {
+                    if (el) deckSlots.current.set(deck.id, el);
+                    else deckSlots.current.delete(deck.id);
+                  }}
                   onSelect={() => onDeck(deck.id)}
                 />
               ))}
             </div>
           ) : (
             // Placeholder keeps the decks row's height so the table doesn't jump.
-            <div className="h-[150px] sm:h-[200px]" />
+            <div className="h-[180px] sm:h-[250px]" />
           )}
 
-          <p className="mt-8 min-h-4 text-center font-mono text-[11px] uppercase tracking-[0.24em] text-ivory/45" aria-live="polite">
+          {stage === "table" && origins && landed.size < decks.length && (
+            <DeckFlights
+              decks={decks}
+              origins={origins}
+              slots={deckSlots}
+              onLand={(id) => setLanded((prev) => new Set(prev).add(id))}
+            />
+          )}
+
+          <p className="mt-8 min-h-4 text-center font-mono text-xs uppercase tracking-[0.24em] text-ivory/50 sm:text-sm" aria-live="polite">
             {stage === "table" ? HINT[state.phase] : ""}
           </p>
 
           <section
             ref={spreadRef}
             aria-label={open ? `${open.label} cards` : undefined}
-            className="mt-10 flex w-full max-w-[900px] flex-wrap items-start justify-center gap-5 sm:mt-14 sm:gap-8"
+            className="mt-10 flex w-full max-w-[1120px] flex-wrap items-start justify-center gap-5 sm:mt-14 sm:gap-9"
           >
             {open?.cards.map((card, i) => {
               const style = DECK_STYLES[open.id];
@@ -253,21 +274,88 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   );
 }
 
+/**
+ * The hand-off from the box to the table: a stand-in card per deck flies from where
+ * its card was pulled out of the box (same place, size and 3D angle) to that deck's
+ * slot, shrinking and laying flat. The real decks wait, hidden, in their slots and
+ * appear as each stand-in lands, so they never move themselves (moving them would
+ * fight the layout animations their cards use for dealing). Measured by hand because
+ * shared-layout animation can't measure the 3D box.
+ */
+function DeckFlights({
+  decks,
+  origins,
+  slots,
+  onLand,
+}: {
+  decks: DeckData[];
+  origins: Map<DeckId, DOMRect>;
+  slots: RefObject<Map<DeckId, HTMLElement>>;
+  onLand: (id: DeckId) => void;
+}) {
+  const [targets, setTargets] = useState<Map<DeckId, DOMRect> | null>(null);
+  // Slots exist by now (rendered in the same commit). Measuring layout and re-rendering
+  // before paint is exactly what useLayoutEffect is for, so no frame shows the
+  // stand-ins in the wrong place.
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTargets(new Map([...slots.current].map(([id, el]) => [id, el.getBoundingClientRect()])));
+  }, [slots]);
+  if (!targets) return null;
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-30 perspective-[1400px]" aria-hidden>
+      {/* Back to front, so About (the box's front card) stays on top. */}
+      {[...decks].reverse().map((deck) => {
+        const order = decks.indexOf(deck);
+        const from = origins.get(deck.id);
+        const to = targets.get(deck.id);
+        if (!from || !to) return null;
+        const style = DECK_STYLES[deck.id];
+        const landscape = style.shape === "landscape";
+        return (
+          <motion.div
+            key={deck.id}
+            className="absolute"
+            style={{ left: to.left, top: to.top, width: to.width, height: to.height, borderRadius: CARD_RADIUS }}
+            initial={{
+              x: from.left + from.width / 2 - (to.left + to.width / 2),
+              y: from.top + from.height / 2 - (to.top + to.height / 2),
+              scale: (landscape ? from.height : from.width) / to.width,
+              rotate: landscape ? 90 : 0,
+              rotateX: BOX_VIEW.rotateX,
+              rotateY: BOX_VIEW.rotateY,
+            }}
+            animate={{ x: 0, y: 0, scale: 1, rotate: 0, rotateX: 0, rotateY: 0 }}
+            transition={{ type: "spring", stiffness: 150, damping: 22, delay: order * DECK_STAGGER }}
+            onAnimationComplete={() => onLand(deck.id)}
+          >
+            <CardBack style={style} label={`${deck.label} card`} />
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Deck({
   deck,
   order,
   phase,
+  hidden,
+  slotRef,
   onSelect,
 }: {
   deck: DeckData;
   order: number;
   phase: Phase;
+  hidden: boolean; // still in flight from the box (see DeckFlights)
+  slotRef: (el: HTMLDivElement | null) => void;
   onSelect: () => void;
 }) {
   const style = DECK_STYLES[deck.id];
   const count = deck.cards.length;
   const dealt = phase === "dealt";
-  const flight = spring(order * DECK_STAGGER);
 
   return (
     <button
@@ -277,16 +365,9 @@ function Deck({
       aria-label={`${deck.label} deck, ${count} ${count === 1 ? "card" : "cards"}${dealt ? ", dealt" : ""}`}
       className="group flex cursor-pointer flex-col items-center gap-4 outline-none"
     >
-      {/* Flies in from the starting pile (shared layoutId), turning upright if it lay sideways. */}
-      <motion.div
-        layoutId={deckLayoutId(deck.id)}
-        // Tipped toward the viewer as it leaves the box, then laid flat on the table.
-        initial={{ rotate: style.shape === "landscape" ? 90 : 0, rotateX: 55 }}
-        animate={{ rotate: 0, rotateX: 0 }}
-        transition={{ layout: flight, rotate: flight, rotateX: flight }}
-        style={{ borderRadius: CARD_RADIUS }}
-      >
+      <div style={{ borderRadius: CARD_RADIUS, visibility: hidden ? "hidden" : undefined }}>
         <div
+          ref={slotRef}
           className={`relative transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 ${SIZE[style.shape].deck}`}
         >
           {/* Empty slot, visible once the deck is dealt out. */}
@@ -307,12 +388,12 @@ function Deck({
               );
             })}
         </div>
-      </motion.div>
+      </div>
       <motion.span
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: order * DECK_STAGGER + DECK_LANDING, duration: 0.3 }}
-        className="font-mono text-[10px] uppercase tracking-[0.22em] text-ivory/65 transition-colors group-hover:text-highlight group-focus-visible:text-highlight sm:text-[11px]"
+        className="font-mono text-xs uppercase tracking-[0.22em] text-ivory/70 transition-colors group-hover:text-highlight group-focus-visible:text-highlight sm:text-sm"
       >
         {deck.label}
       </motion.span>
@@ -327,9 +408,9 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
       onClick={onToggle}
       aria-pressed={muted}
       aria-label={muted ? "Unmute sound effects" : "Mute sound effects"}
-      className="fixed right-4 top-4 z-50 grid size-10 cursor-pointer place-items-center rounded-full text-ivory/60 transition-colors hover:text-highlight focus-visible:text-highlight focus-visible:outline-2 focus-visible:outline-highlight"
+      className="fixed right-4 top-4 z-50 grid size-12 cursor-pointer place-items-center rounded-full text-ivory/60 transition-colors hover:text-highlight focus-visible:text-highlight focus-visible:outline-2 focus-visible:outline-highlight"
     >
-      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+      <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
         <path d="M4 9v6h4l5 4V5L8 9H4z" strokeLinejoin="round" />
         {muted ? (
           <path d="M17 9l5 6M22 9l-5 6" strokeLinecap="round" />

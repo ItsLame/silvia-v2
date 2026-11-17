@@ -121,10 +121,10 @@ export function CardBack({ style, label }: { style: DeckStyle; label: string }) 
     >
       <div className="grid h-full w-full place-items-center rounded-[6px] border" style={lattice}>
         <span
-          className={`grid aspect-square w-[42%] max-w-12 place-items-center rounded-full border leading-none ${
+          className={`grid aspect-square w-[42%] max-w-16 place-items-center rounded-full border leading-none ${
             isLight
-              ? "font-poppins text-[clamp(12px,2.6vw,20px)] font-extrabold text-v1-red"
-              : "font-display text-[clamp(14px,3.2vw,26px)] text-ivory/85"
+              ? "font-poppins text-[clamp(14px,3vw,24px)] font-extrabold text-v1-red"
+              : "font-display text-[clamp(18px,3.8vw,32px)] text-ivory/85"
           }`}
           style={{ background: style.back, borderColor: style.trim }}
           aria-hidden
@@ -163,7 +163,7 @@ const ICON_PATHS: Record<string, ReactNode> = {
   ),
 };
 
-function Icon({ name, className = "size-4 text-v1-red sm:size-[18px]" }: { name: string; className?: string }) {
+function Icon({ name, className = "size-4 text-v1-red sm:size-5" }: { name: string; className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -196,7 +196,7 @@ function ContactLink({ href, icon, label, text }: { href: string; icon: string; 
       >
         <Icon name={icon} />
         <span className="underline-offset-2 group-hover/link:underline">{text}</span>
-        <Icon name="external" className="size-3 text-v1-ink/40 group-hover/link:text-v1-red sm:size-3.5" />
+        <Icon name="external" className="size-3 text-v1-ink/40 group-hover/link:text-v1-red sm:size-4" />
       </a>
     </li>
   );
@@ -205,13 +205,13 @@ function ContactLink({ href, icon, label, text }: { href: string; icon: string; 
 function BusinessCard({ card }: { card: Extract<CardData, { kind: "contact" }> }) {
   return (
     <div
-      className={`${face} rotate-y-180 flex flex-col justify-between overflow-hidden bg-v1-cream p-5 font-poppins text-v1-ink shadow-[0_2px_8px_rgba(0,0,0,.35)] sm:p-6`}
+      className={`${face} rotate-y-180 flex flex-col justify-between overflow-hidden bg-v1-cream p-5 font-poppins text-v1-ink shadow-[0_2px_8px_rgba(0,0,0,.35)] sm:p-8`}
     >
       <div>
-        <p className="text-[26px] font-extrabold leading-none text-v1-red sm:text-[32px]">{card.name}</p>
-        <p className="mt-2.5 text-xs font-semibold text-v1-red-deep sm:text-sm">{card.headline}</p>
+        <p className="text-[28px] font-extrabold leading-none text-v1-red sm:text-[40px]">{card.name}</p>
+        <p className="mt-2.5 text-sm font-semibold text-v1-red-deep sm:mt-3 sm:text-lg">{card.headline}</p>
       </div>
-      <ul className="space-y-1.5 text-[11px] sm:text-xs">
+      <ul className="space-y-1.5 text-xs sm:space-y-2 sm:text-base">
         {card.email && <ContactLink href={`mailto:${card.email}`} icon="mail" label="Email" text={card.email} />}
         {card.socials.map((s) => (
           <ContactLink key={s.url} href={s.url} icon={s.label.toLowerCase()} label={s.label} text={handle(s.url)} />
@@ -224,9 +224,9 @@ function BusinessCard({ card }: { card: Extract<CardData, { kind: "contact" }> }
 function Index({ style, rank, flip }: { style: DeckStyle; rank: string; flip?: boolean }) {
   return (
     <div
-      className={`absolute flex flex-col items-center font-mono text-[10px] leading-none sm:text-[11px] ${
+      className={`absolute flex flex-col items-center font-mono text-[11px] leading-none sm:text-sm ${
         style.red ? "text-suit-red" : "text-ink"
-      } ${flip ? "bottom-2 right-2 rotate-180" : "left-2 top-2"}`}
+      } ${flip ? "bottom-2.5 right-2.5 rotate-180" : "left-2.5 top-2.5"}`}
       aria-hidden
     >
       <span className="font-semibold">{rank}</span>
@@ -253,15 +253,15 @@ export function CardFace({
 
   if (card.kind === "project") {
     return (
-      <div className={`${base} flex flex-col px-4 pb-4 pt-9 sm:px-5`}>
+      <div className={`${base} flex flex-col px-4 pb-4 pt-10 sm:px-6 sm:pb-5 sm:pt-12`}>
         <Index style={style} rank={rank} />
-        <p className="font-display text-xl leading-tight sm:text-2xl">{card.title}</p>
-        <p className="mt-2 line-clamp-3 text-[11px] leading-snug text-ink/70 sm:line-clamp-5 sm:text-xs">
+        <p className="font-display text-[22px] leading-tight sm:text-3xl">{card.title}</p>
+        <p className="mt-2 line-clamp-3 text-xs leading-snug text-ink/70 sm:mt-3 sm:line-clamp-5 sm:text-sm">
           {card.description}
         </p>
-        <ul className="mt-auto flex max-h-[22px] flex-wrap gap-1 overflow-hidden pt-0.5 sm:max-h-none">
+        <ul className="mt-auto flex max-h-[24px] flex-wrap gap-1 overflow-hidden pt-0.5 sm:max-h-none sm:gap-1.5">
           {card.tags.slice(0, 4).map((t) => (
-            <li key={t} className="rounded-full border border-ink/15 px-1.5 py-0.5 font-mono text-[9px] text-ink/60">
+            <li key={t} className="rounded-full border border-ink/15 px-1.5 py-0.5 font-mono text-[10px] text-ink/60 sm:px-2 sm:text-xs">
               {t}
             </li>
           ))}
@@ -274,11 +274,11 @@ export function CardFace({
     <div className={`${base} grid place-items-center`}>
       <Index style={style} rank={rank} />
       <div className="text-center">
-        <p className={`text-4xl ${style.red ? "text-suit-red" : "text-ink"}`} aria-hidden>
+        <p className={`text-4xl sm:text-6xl ${style.red ? "text-suit-red" : "text-ink"}`} aria-hidden>
           {style.suit}
         </p>
-        <p className="mt-2 font-display text-xl sm:text-2xl">{card.title}</p>
-        <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-ink/40">Placeholder</p>
+        <p className="mt-2 font-display text-2xl sm:mt-3 sm:text-4xl">{card.title}</p>
+        <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-ink/40 sm:text-xs">Placeholder</p>
       </div>
       <Index style={style} rank={rank} flip />
     </div>

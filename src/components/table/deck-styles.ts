@@ -19,20 +19,17 @@ export const DECK_STYLES: Record<DeckId, DeckStyle> = {
   games: { suit: "♣", red: false, back: "#111111", trim: "#ffffff", shape: "portrait", variant: "uno" },
 };
 
-// Card sizes. Pile = inside the starting deck (same size as its cover). Deck = small,
-// on the table edge. Dealt = larger, laid out to read. Landscape pile cards lie
-// sideways, so their width roughly matches the cover's height.
-export const COVER_SIZE = "w-[200px] sm:w-[240px] aspect-[5/7]";
+// Card sizes. Deck = on the table edge. Dealt = laid out to read. (Cards inside the
+// deck box are sized in deck-box.tsx.) Phone widths fit three decks / two dealt
+// cards per row in a 375px screen.
 export const SIZE = {
   portrait: {
-    pile: COVER_SIZE,
-    deck: "w-[76px] sm:w-[104px] aspect-[5/7]",
-    dealt: "w-[148px] sm:w-[184px] aspect-[5/7]",
+    deck: "w-[96px] sm:w-[136px] aspect-[5/7]",
+    dealt: "w-[158px] sm:w-[236px] aspect-[5/7]",
   },
   landscape: {
-    pile: "w-[272px] sm:w-[328px] aspect-[7/4]",
-    deck: "w-[108px] sm:w-[148px] aspect-[7/4]",
-    dealt: "w-[300px] sm:w-[360px] aspect-[7/4]",
+    deck: "w-[134px] sm:w-[190px] aspect-[7/4]",
+    dealt: "w-[330px] sm:w-[460px] aspect-[7/4]",
   },
 } as const;
 
