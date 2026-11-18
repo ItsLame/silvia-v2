@@ -16,10 +16,9 @@ type Phase = "idle" | "dealt" | "collecting";
 type TableState = { deck: DeckId | null; phase: Phase };
 
 // Timings, in seconds.
-// Card stream out of the box (Slay the Spire style): small card backs fly in staggered,
-// spinning arcs to their decks, growing to deck size as they land.
-const STREAM_STEP = 0.05; // between one card launching and the next
-const STREAM_FLIGHT = 0.6;
+// Decks tossed out of the box onto the table, one after another.
+const TOSS_STEP = 0.07; // between one deck leaving the box and the next
+const TOSS = 0.5;
 const DEAL_STAGGER = 0.09;
 const LANDING = 0.4; // roughly when a dealt card settles after it starts flying
 const FLIP = 0.45;
@@ -60,12 +59,12 @@ const HIGHLIGHT =
 export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
   const [stage, setStage] = useState<Stage>("box");
   const [boxGone, setBoxGone] = useState(false);
-  // The box's opening (cards stream out from there) and each deck's slot (they land there).
+  // The box's opening (decks come out from there) and each deck's slot (they land there).
   const boxOpening = useRef<HTMLDivElement>(null);
-  const [streamFrom, setStreamFrom] = useState<{ x: number; y: number } | null>(null);
+  const [tossFrom, setTossFrom] = useState<{ x: number; y: number } | null>(null);
   const deckSlots = useRef(new Map<DeckId, HTMLElement>());
   const [landed, setLanded] = useState<Set<DeckId>>(new Set());
-  const [streamDone, setStreamDone] = useState(false);
+  const [tossDone, setTossDone] = useState(false);
   const [state, setState] = useState<TableState>({ deck: null, phase: "idle" });
   const stateRef = useRef(state);
   const timers = useRef<number[]>([]);
@@ -86,12 +85,12 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     unlock();
     if (stage !== "box") return;
     setStage("opening");
-    // Lid flips open, the cards slide out, then each deck lands on the table.
+    // Lid flips open, then each deck is tossed out onto the table.
     play("take", 0, 0.45);
-    // Measured now, before the box moves: the stream keeps coming from where it was.
+    // Measured now, before the box moves: the decks keep coming from where it was.
     const r = boxOpening.current?.getBoundingClientRect();
-    if (r) setStreamFrom({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-    // Then straight away: the box drops off the table and the cards stream out.
+    if (r) setTossFrom({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    // Then straight away: the box drops off the table and the decks come out.
     after(OPEN_DELAY, () => {
       setStage("table");
       play("shuffle", 0.05, 0.6);
@@ -213,7 +212,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
                   key={deck.id}
                   deck={deck}
                   phase={state.deck === deck.id ? state.phase : "idle"}
-                  hidden={!!streamFrom && !streamDone && !landed.has(deck.id)}
+                  hidden={!!tossFrom && !tossDone && !landed.has(deck.id)}
                   slotRef={(el) => {
                     if (el) deckSlots.current.set(deck.id, el);
                     else deckSlots.current.delete(deck.id);
@@ -227,16 +226,16 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
             <div className="h-[180px] sm:h-[250px]" />
           )}
 
-          {stage === "table" && streamFrom && !streamDone && (
-            <CardStream
+          {stage === "table" && tossFrom && !tossDone && (
+            <DeckToss
               decks={decks}
-              from={streamFrom}
+              from={tossFrom}
               slots={deckSlots}
               onLand={(id) => {
-                play("place", 0, 0.22);
+                play("place", 0, 0.4);
                 setLanded((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
               }}
-              onDone={() => setStreamDone(true)}
+              onDone={() => setTossDone(true)}
             />
           )}
 
@@ -282,13 +281,12 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
 }
 
 /**
- * The hand-off from the box to the table, after Slay the Spire's pile shuffles: one
- * small card back per card in each deck streams out of the box opening in a quick,
- * spinning arc, dealt round-robin across the decks, and grows to deck size as it lands
- * on its slot. A deck appears when its first card lands. The real decks never move
- * (moving them would fight the layout animations their cards use for dealing).
+ * The hand-off from the box to the table: each deck is tossed out of the box opening
+ * in a quick arc, staggered left to right, and settles onto its slot. A deck appears
+ * when it lands. These are stand-ins; the real decks never move (moving them would
+ * fight the layout animations their cards use for dealing).
  */
-function CardStream({
+function DeckToss({
   decks,
   from,
   slots,
@@ -304,7 +302,7 @@ function CardStream({
   const [targets, setTargets] = useState<Map<DeckId, DOMRect> | null>(null);
   const landedCount = useRef(0);
   // Slots exist by now (rendered in the same commit). Measuring layout and re-rendering
-  // before paint is exactly what useLayoutEffect is for, so no frame shows the cards
+  // before paint is exactly what useLayoutEffect is for, so no frame shows the decks
   // in the wrong place.
   useLayoutEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -312,14 +310,9 @@ function CardStream({
   }, [slots]);
   if (!targets) return null;
 
-  // Round-robin: one card to each deck in turn, so the stream fans across the table.
-  const flights: { deck: DeckData; n: number }[] = [];
-  const rounds = Math.max(...decks.map((d) => d.cards.length));
-  for (let n = 0; n < rounds; n++) for (const deck of decks) if (n < deck.cards.length) flights.push({ deck, n });
-
   return (
     <div className="pointer-events-none fixed inset-0 z-30" aria-hidden>
-      {flights.map(({ deck, n }, i) => {
+      {decks.map((deck, i) => {
         const to = targets.get(deck.id);
         if (!to) return null;
         const style = DECK_STYLES[deck.id];
@@ -328,32 +321,44 @@ function CardStream({
         const sx = from.x - (to.left + to.width / 2);
         const sy = from.y - (to.top + to.height / 2);
         const len = Math.hypot(sx, sy) || 1;
-        let px = (-sy / len) * Math.min(140, len * 0.35);
-        let py = (sx / len) * Math.min(140, len * 0.35);
+        let px = (-sy / len) * Math.min(90, len * 0.25);
+        let py = (sx / len) * Math.min(90, len * 0.25);
         if (py > 0) [px, py] = [-px, -py];
-        const spin = (i % 2 ? 1 : -1) * (200 + ((i * 47) % 160)); // deterministic variety
-        const last = i === flights.length - 1;
+        const tilt = (i % 2 ? 1 : -1) * (8 + ((i * 5) % 7)); // deterministic variety
+        // Same stack the real deck shows, so the swap on landing is seamless.
+        const layers = deck.cards.slice(-3);
         return (
           <motion.div
-            key={`${deck.id}-${n}`}
+            key={deck.id}
             className="absolute"
-            style={{ left: to.left, top: to.top, width: to.width, height: to.height, borderRadius: CARD_RADIUS }}
-            initial={{ x: sx, y: sy, scale: 0.3, rotate: spin, opacity: 0 }}
+            style={{ left: to.left, top: to.top, width: to.width, height: to.height }}
+            initial={{ x: sx, y: sy, scale: 0.4, rotate: tilt, opacity: 0 }}
             animate={{
               x: [sx, sx / 2 + px, 0],
               y: [sy, sy / 2 + py, 0],
-              scale: [0.3, 0.55, 1],
-              rotate: [spin, spin * 0.35, 0],
+              scale: [0.4, 0.85, 1],
+              rotate: [tilt, tilt * 0.4, 0],
               opacity: [0, 1, 1],
             }}
-            transition={{ duration: STREAM_FLIGHT, delay: i * STREAM_STEP, times: [0, 0.5, 1], ease: "easeInOut" }}
+            transition={{ duration: TOSS, delay: i * TOSS_STEP, times: [0, 0.55, 1], ease: "easeOut" }}
             onAnimationComplete={() => {
               onLand(deck.id);
               landedCount.current += 1;
-              if (last || landedCount.current === flights.length) onDone();
+              if (landedCount.current === decks.length) onDone();
             }}
           >
-            <CardBack style={style} label={`${deck.label} card`} />
+            {layers.map((card, j) => {
+              const offset = Math.min(deck.cards.length - layers.length + j, 7) * 1.5;
+              return (
+                <div
+                  key={card.id}
+                  className="absolute h-full w-full"
+                  style={{ top: -offset, left: offset * 0.4, borderRadius: CARD_RADIUS }}
+                >
+                  <CardBack style={style} label={`${deck.label} card`} />
+                </div>
+              );
+            })}
           </motion.div>
         );
       })}
@@ -370,7 +375,7 @@ function Deck({
 }: {
   deck: DeckData;
   phase: Phase;
-  hidden: boolean; // its first card hasn't landed yet (see CardStream)
+  hidden: boolean; // still in the air (see DeckToss)
   slotRef: (el: HTMLDivElement | null) => void;
   onSelect: () => void;
 }) {

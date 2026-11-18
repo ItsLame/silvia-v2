@@ -8,7 +8,7 @@ export type BoxStage = "closed" | "opening" | "leaving";
 export const HEADLINE_IDS = { name: "headline-name", title: "headline-title" } as const;
 
 // Timeline, in seconds: the lid starts flipping back; after a beat the box drops off
-// the table while the cards stream out of where it was (see CardStream in card-table).
+// the table while the decks are tossed out of where it was (see DeckToss in card-table).
 const LID = 0.4;
 export const OPEN_DELAY = 0.18;
 export const BOX_DROP = 0.6;
@@ -75,7 +75,7 @@ function Panel({
 /**
  * The starting screen: a flip-top deck box, front-on, with the name printed on it.
  * Clicking it flips the lid back and the box drops away; `openingRef` marks the box's
- * opening so the table can stream the cards out from there.
+ * opening so the table can toss the decks out from there.
  */
 export function DeckBox({
   name,
