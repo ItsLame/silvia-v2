@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
 // Sound effects by oxidvideos (Pixabay). Files live in public/sounds.
 const FILES = {
-  shuffle: "/sounds/shuffle.mp3",
   place: "/sounds/place.mp3",
   take1: "/sounds/take-1.mp3",
   take2: "/sounds/take-2.mp3",

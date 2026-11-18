@@ -49,6 +49,12 @@ button:enabled:focus-visible > .deck-box {
   --deck-glow: rgb(250 204 21 / 0.35);
 }
 
+/* Keep room for the scrollbar so nothing shifts sideways when dealt cards make the
+   page scroll. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   color: var(--color-ivory);
   background-color: var(--color-felt-deep);

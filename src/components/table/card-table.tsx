@@ -69,6 +69,9 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   const stateRef = useRef(state);
   const timers = useRef<number[]>([]);
   const spreadRef = useRef<HTMLElement>(null);
+  // The decks row; when it scrolls out of view a dock of mini decks takes its place.
+  const decksRef = useRef<HTMLDivElement>(null);
+  const [decksInView, setDecksInView] = useState(true);
   const { play, unlock, muted, toggleMuted } = useCardSounds();
   const byId = useMemo(() => new Map(decks.map((d) => [d.id, d])), [decks]);
 
@@ -81,6 +84,16 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
+  useEffect(() => {
+    const row = decksRef.current;
+    if (stage !== "table" || !row) return;
+    const io = new IntersectionObserver(([entry]) => setDecksInView(entry.intersectionRatio >= 0.4), {
+      threshold: [0, 0.4, 1],
+    });
+    io.observe(row);
+    return () => io.disconnect();
+  }, [stage]);
+
   const openTable = () => {
     unlock();
     if (stage !== "box") return;
@@ -91,10 +104,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     const r = boxOpening.current?.getBoundingClientRect();
     if (r) setTossFrom({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
     // Then straight away: the box drops off the table and the decks come out.
-    after(OPEN_DELAY, () => {
-      setStage("table");
-      play("shuffle", 0.05, 0.6);
-    });
+    after(OPEN_DELAY, () => setStage("table"));
     after(OPEN_DELAY + BOX_DROP + 0.05, () => setBoxGone(true));
   };
 
@@ -134,6 +144,14 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     deal(id);
   };
 
+  // From the dock: back up to the decks first, so the cards visibly gather into and
+  // deal out of them, then behave exactly as if that deck was clicked.
+  const onDock = (id: DeckId) => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+    onDeck(id);
+  };
+
   // Re-subscribes each render so the handler always sees the current `collect`.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && collect();
@@ -146,15 +164,15 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   return (
     <MotionConfig reducedMotion="user">
       <LayoutGroup>
-        {/* Headline embossed into the middle of the table, like a logo printed on the
-            felt. Fixed behind everything, so it takes no layout space; the text arrives
-            from the deck box. */}
+        {/* Headline embossed into the table, like a logo printed on the felt. It sits
+            in the middle of the first screen and scrolls with the table, behind
+            everything, so it takes no layout space; the text arrives from the deck box. */}
         {stage === "table" && (
-          <div className="pointer-events-none fixed inset-0 grid place-items-center px-4 text-center" aria-hidden>
+          <div className="pointer-events-none absolute inset-x-0 top-0 grid h-dvh place-items-center px-4 text-center" aria-hidden>
             <div className="flex flex-col items-center">
               <motion.p
                 layoutId={HEADLINE_IDS.name}
-                className="font-poppins text-6xl font-extrabold leading-none tracking-tight sm:text-9xl"
+                className="whitespace-nowrap font-poppins text-[clamp(3rem,14vw,8rem)] font-extrabold leading-none tracking-tight"
                 initial={INK}
                 animate={DEBOSS}
                 transition={{ layout: spring(0), default: { delay: 0.35, duration: 0.6 } }}
@@ -174,8 +192,14 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
           </div>
         )}
 
-        <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col items-center px-4 pb-20 pt-16 sm:pt-20">
+        <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col items-center px-4 pb-36 pt-16 sm:pb-20 sm:pt-20">
           <MuteToggle muted={muted} onToggle={toggleMuted} />
+          <DeckDock
+            decks={decks}
+            active={state.phase === "dealt" ? state.deck : null}
+            shown={stage === "table" && !decksInView}
+            onSelect={onDock}
+          />
           <h1 className="sr-only">
             {name}, {headline}
           </h1>
@@ -206,7 +230,10 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
           )}
 
           {stage === "table" ? (
-            <div className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 perspective-[1400px] sm:gap-x-14">
+            <div
+              ref={decksRef}
+              className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 perspective-[1400px] sm:gap-x-14"
+            >
               {decks.map((deck) => (
                 <Deck
                   key={deck.id}
@@ -424,6 +451,75 @@ function Deck({
         {deck.label}
       </motion.span>
     </button>
+  );
+}
+
+/**
+ * Mini decks that stay reachable once the real ones have scrolled away: along the
+ * bottom edge on phones (where thumbs are), the top on wider screens. The minis are
+ * the real card backs drawn at deck size and scaled down, so they match exactly.
+ */
+function DeckDock({
+  decks,
+  active,
+  shown,
+  onSelect,
+}: {
+  decks: DeckData[];
+  active: DeckId | null;
+  shown: boolean;
+  onSelect: (id: DeckId) => void;
+}) {
+  return (
+    <nav
+      aria-label="Decks"
+      inert={!shown}
+      className={`fixed inset-x-0 bottom-[max(12px,env(safe-area-inset-bottom))] z-40 flex justify-center px-4 transition-[translate,opacity] duration-300 ease-out sm:top-4 sm:bottom-auto ${
+        shown ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-6 opacity-0 sm:-translate-y-6"
+      }`}
+    >
+      <ul className="flex items-end gap-3 rounded-2xl border border-ivory/10 bg-felt-deep/85 px-4 pb-2 pt-3 shadow-[0_8px_24px_rgba(0,0,0,.45)] backdrop-blur-md sm:gap-5 sm:px-5">
+        {decks.map((deck) => {
+          const style = DECK_STYLES[deck.id];
+          const landscape = style.shape === "landscape";
+          const on = active === deck.id;
+          return (
+            <li key={deck.id}>
+              <button
+                type="button"
+                onClick={() => onSelect(deck.id)}
+                aria-pressed={on}
+                aria-label={`${deck.label} deck${on ? ", dealt" : ""}`}
+                className="group flex cursor-pointer flex-col items-center gap-1.5 outline-none"
+              >
+                {/* Card drawn at phone deck size (96 or 134px wide), shown at 40%. */}
+                <span
+                  className={`relative block rounded-[4px] outline-2 outline-offset-2 transition-[outline-color,translate] group-hover:-translate-y-0.5 group-hover:outline-highlight group-focus-visible:outline-highlight ${
+                    on ? "outline-highlight" : "outline-transparent"
+                  } ${landscape ? "h-[30.6px] w-[53.6px]" : "h-[53.8px] w-[38.4px]"}`}
+                  aria-hidden
+                >
+                  <span
+                    className={`absolute left-0 top-0 origin-top-left scale-[0.4] ${
+                      landscape ? "aspect-[7/4] w-[134px]" : "aspect-[5/7] w-[96px]"
+                    }`}
+                  >
+                    <CardBack style={style} label="" />
+                  </span>
+                </span>
+                <span
+                  className={`whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.14em] transition-colors group-hover:text-highlight group-focus-visible:text-highlight ${
+                    on ? "text-highlight" : "text-ivory/70"
+                  }`}
+                >
+                  {deck.label}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 
