@@ -1,9 +1,18 @@
 "use client";
 
 import { LayoutGroup, MotionConfig, motion } from "motion/react";
-import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { CardBack, CardFace } from "./card-faces";
-import { CARD_RADIUS, DECK_STYLES, SIZE } from "./deck-styles";
+import { ASPECT, CARD_RADIUS, DEALT_W, DECK_STYLES, DECK_W, type DeckStyle, MINI_W, SIZE } from "./deck-styles";
 import { BOX_DROP, BOX_TEXT_COLOR, DeckBox, HEADLINE_IDS, OPEN_DELAY } from "./deck-box";
 import type { DeckData, DeckId } from "./types";
 import { useCardSounds } from "./use-card-sounds";
@@ -52,9 +61,29 @@ const HINT: Record<Stage | Phase, string> = {
   dealt: "Click the deck again or press Esc to gather",
   collecting: "Gathering…",
 };
+// On phones the decks are in the dock below, and there's no Esc key.
+const PHONE_HINT: Partial<Record<Phase, string>> = {
+  idle: "Pick a deck below",
+  dealt: "Tap the deck again to gather",
+};
 
 const HIGHLIGHT =
   "outline-2 outline-offset-[3px] outline-transparent transition-[outline-color,box-shadow] group-hover:shadow-[0_0_22px_rgba(250,204,21,.35)] group-hover:outline-highlight group-focus-visible:shadow-[0_0_22px_rgba(250,204,21,.35)] group-focus-visible:outline-highlight";
+
+// Phones (below Tailwind's `sm`) get the decks in a dock along the bottom edge
+// instead of on the table. False on the server; the table only appears after a click.
+const PHONE = "(max-width: 639.98px)";
+function useIsPhone() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(PHONE);
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(PHONE).matches,
+    () => false,
+  );
+}
 
 export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
   const [stage, setStage] = useState<Stage>("box");
@@ -69,9 +98,11 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
   const stateRef = useRef(state);
   const timers = useRef<number[]>([]);
   const spreadRef = useRef<HTMLElement>(null);
+  const holdRef = useRef<HTMLDivElement>(null);
   // The decks row; when it scrolls out of view a dock of mini decks takes its place.
   const decksRef = useRef<HTMLDivElement>(null);
   const [decksInView, setDecksInView] = useState(true);
+  const phone = useIsPhone();
   const { play, unlock, muted, toggleMuted } = useCardSounds();
   const byId = useMemo(() => new Map(decks.map((d) => [d.id, d])), [decks]);
 
@@ -92,7 +123,30 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     });
     io.observe(row);
     return () => io.disconnect();
-  }, [stage]);
+  }, [stage, phone]);
+
+  // Phones: the deck menu is fixed to the screen, and layout animations measure in page
+  // coordinates. If gathering cards shrank the page and the browser pulled the scroll
+  // up in the same render, every deck in the menu would look like it had moved and
+  // animate (the "shuffle"), and the gathering cards would aim for the wrong spot. So
+  // the page never gets shorter than what's scrolled into view: an invisible strip
+  // from the top of the page down to the bottom of the screen holds it open, and
+  // shortens as you scroll back up.
+  useEffect(() => {
+    const spacer = holdRef.current;
+    if (!phone || !spacer) return;
+    const hold = () => {
+      spacer.style.height = `${window.scrollY + window.innerHeight}px`;
+    };
+    hold();
+    window.addEventListener("scroll", hold, { passive: true });
+    window.addEventListener("resize", hold);
+    return () => {
+      window.removeEventListener("scroll", hold);
+      window.removeEventListener("resize", hold);
+      spacer.style.height = "";
+    };
+  }, [phone]);
 
   const openTable = () => {
     unlock();
@@ -112,11 +166,11 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     const count = byId.get(id)!.cards.length;
     set({ deck: id, phase: "dealt" });
     for (let i = 0; i < count; i++) play("place", i * DEAL_STAGGER + LANDING, 0.55);
-    // If the spread starts low in the window, follow the cards down as they fly.
+    // If the spread starts low in the window (or above it), follow the cards as they fly.
     requestAnimationFrame(() => {
       const top = spreadRef.current?.getBoundingClientRect().top ?? 0;
       const target = window.innerHeight * 0.38;
-      if (top > target + 40) {
+      if (top > target + 40 || top < 0) {
         const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         window.scrollBy({ top: top - target, behavior: reduce ? "auto" : "smooth" });
       }
@@ -132,7 +186,13 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     for (let i = 0; i < count; i++) play("take", i * COLLECT_STAGGER, 0.45);
     after(count * COLLECT_STAGGER + COLLECT, () => {
       set({ deck: null, phase: "idle" });
-      then?.();
+      if (then) return then();
+      // Phones: nothing is left down the page once the cards are back, so return to
+      // the top (after this render, so no layout animation sees the scroll move).
+      if (phone && window.scrollY > 0) {
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" }));
+      }
     });
   };
 
@@ -144,13 +204,22 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     deal(id);
   };
 
-  // From the dock: back up to the decks first, so the cards visibly gather into and
-  // deal out of them, then behave exactly as if that deck was clicked.
+  // From the dock on wider screens: back up to the decks first, so the cards visibly
+  // gather into and deal out of them, then behave exactly as if that deck was clicked.
   const onDock = (id: DeckId) => {
+    // On phones the dock *is* the decks, so there's nowhere to go back to.
+    if (phone) return onDeck(id);
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
     onDeck(id);
   };
+
+  const slotRef = (id: DeckId) => (el: HTMLElement | null) => {
+    if (el) deckSlots.current.set(id, el);
+    else deckSlots.current.delete(id);
+  };
+  const inAir = (id: DeckId) => !!tossFrom && !tossDone && !landed.has(id);
+  const phaseOf = (id: DeckId) => (state.deck === id ? state.phase : "idle");
 
   // Re-subscribes each render so the handler always sees the current `collect`.
   useEffect(() => {
@@ -194,10 +263,16 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
 
         <main className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col items-center px-4 pb-36 pt-16 sm:pb-20 sm:pt-20">
           <MuteToggle muted={muted} onToggle={toggleMuted} />
+          {/* Phones: the deck menu, always there once the box is open; the decks are
+              tossed into it and deal from it. Wider screens: a shortcut that appears
+              once the decks on the table have scrolled away. */}
           <DeckDock
             decks={decks}
-            active={state.phase === "dealt" ? state.deck : null}
-            shown={stage === "table" && !decksInView}
+            phone={phone}
+            phaseOf={phaseOf}
+            shown={stage === "table" && (phone || !decksInView)}
+            inAir={phone ? inAir : () => false}
+            slotRef={phone ? slotRef : undefined}
             onSelect={onDock}
           />
           <h1 className="sr-only">
@@ -229,7 +304,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
             </div>
           )}
 
-          {stage === "table" ? (
+          {stage === "table" && !phone ? (
             <div
               ref={decksRef}
               className="flex flex-wrap items-end justify-center gap-x-6 gap-y-8 perspective-[1400px] sm:gap-x-14"
@@ -238,24 +313,23 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
                 <Deck
                   key={deck.id}
                   deck={deck}
-                  phase={state.deck === deck.id ? state.phase : "idle"}
-                  hidden={!!tossFrom && !tossDone && !landed.has(deck.id)}
-                  slotRef={(el) => {
-                    if (el) deckSlots.current.set(deck.id, el);
-                    else deckSlots.current.delete(deck.id);
-                  }}
+                  phase={phaseOf(deck.id)}
+                  hidden={inAir(deck.id)}
+                  slotRef={slotRef(deck.id)}
                   onSelect={() => onDeck(deck.id)}
+                  phone={phone}
                 />
               ))}
             </div>
           ) : (
             // Placeholder keeps the decks row's height so the table doesn't jump.
-            <div className="h-[180px] sm:h-[250px]" />
+            <div className="h-[180px] max-sm:hidden sm:h-[250px]" />
           )}
 
           {stage === "table" && tossFrom && !tossDone && (
             <DeckToss
               decks={decks}
+              phone={phone}
               from={tossFrom}
               slots={deckSlots}
               onLand={(id) => {
@@ -267,13 +341,15 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
           )}
 
           <p className="mt-8 min-h-4 text-center font-mono text-xs uppercase tracking-[0.24em] text-ivory/50 sm:text-sm" aria-live="polite">
-            {stage === "table" ? HINT[state.phase] : ""}
+            {stage === "table" ? ((phone && PHONE_HINT[state.phase]) || HINT[state.phase]) : ""}
           </p>
 
           <section
             ref={spreadRef}
             aria-label={open ? `${open.label} cards` : undefined}
-            className="mt-10 flex w-full max-w-[1120px] flex-wrap items-start justify-center gap-5 sm:mt-14 sm:gap-9"
+            // Centred in the space left on the first screen when it fits (a single
+            // card sits in the middle), starting from the top when it doesn't.
+            className="my-auto flex w-full max-w-[1120px] flex-wrap items-start justify-center gap-5 pt-10 sm:gap-9 sm:pt-14"
           >
             {open?.cards.map((card, i) => {
               const style = DECK_STYLES[open.id];
@@ -302,6 +378,7 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
             })}
           </section>
         </main>
+        <div ref={holdRef} className="pointer-events-none absolute left-0 top-0 w-px" aria-hidden />
       </LayoutGroup>
     </MotionConfig>
   );
@@ -315,12 +392,14 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
  */
 function DeckToss({
   decks,
+  phone,
   from,
   slots,
   onLand,
   onDone,
 }: {
   decks: DeckData[];
+  phone: boolean;
   from: { x: number; y: number };
   slots: RefObject<Map<DeckId, HTMLElement>>;
   onLand: (id: DeckId) => void;
@@ -354,11 +433,18 @@ function DeckToss({
         const tilt = (i % 2 ? 1 : -1) * (8 + ((i * 5) % 7)); // deterministic variety
         // Same stack the real deck shows, so the swap on landing is seamless.
         const layers = deck.cards.slice(-3);
+        const mini = to.width < 80; // landing in the phone dock
+        const fit = deckFit(style.shape, mini, phone);
         return (
           <motion.div
             key={deck.id}
             className="absolute"
-            style={{ left: to.left, top: to.top, width: to.width, height: to.height }}
+            style={{
+              left: to.left,
+              top: to.top,
+              width: to.width,
+              height: to.height,
+            }}
             initial={{ x: sx, y: sy, scale: 0.4, rotate: tilt, opacity: 0 }}
             animate={{
               x: [sx, sx / 2 + px, 0],
@@ -375,12 +461,16 @@ function DeckToss({
             }}
           >
             {layers.map((card, j) => {
-              const offset = Math.min(deck.cards.length - layers.length + j, 7) * 1.5;
+              const i = deck.cards.length - layers.length + j;
               return (
                 <div
                   key={card.id}
-                  className="absolute h-full w-full"
-                  style={{ top: -offset, left: offset * 0.4, borderRadius: CARD_RADIUS }}
+                  className="absolute"
+                  style={{
+                    ...cardPlacement(fit, i, deck.cards.length, mini),
+                    borderRadius: CARD_RADIUS,
+                    transform: `scale(${fit.scale})`,
+                  }}
                 >
                   <CardBack style={style} label={`${deck.label} card`} />
                 </div>
@@ -393,22 +483,61 @@ function DeckToss({
   );
 }
 
+// How a deck draws its cards: full dealt-size cards, scaled down and centred on the
+// deck's slot (see SIZE in deck-styles), so cards never scale up in flight.
+function deckFit(shape: DeckStyle["shape"], mini: boolean, phone: boolean) {
+  const slotW = mini ? MINI_W[shape] : DECK_W[shape];
+  const cardW = DEALT_W[shape][phone ? "phone" : "wide"];
+  const scale = slotW / cardW;
+  return { slotW, slotH: slotW * ASPECT[shape], cardW, cardH: cardW * ASPECT[shape], scale, radius: CARD_RADIUS * scale };
+}
+type Fit = ReturnType<typeof deckFit>;
+
+// Each card sits a little up and to the right of the one below it. Mini decks stay
+// level: at most two steps, so a big deck's top card sits no higher than a small one's.
+function stackOffset(i: number, count: number, mini: boolean) {
+  const o = mini ? Math.min(count - 1, 2) - Math.min(count - 1 - i, 2) : Math.min(i, 7) * 1.5;
+  return { x: o * 0.4, y: -o };
+}
+function cardPlacement(fit: Fit, i: number, count: number, mini: boolean): CSSProperties {
+  const { x, y } = stackOffset(i, count, mini);
+  return {
+    width: fit.cardW,
+    height: fit.cardH,
+    left: (fit.slotW - fit.cardW) / 2 + x,
+    top: (fit.slotH - fit.cardH) / 2 + y,
+  };
+}
+
 function Deck({
   deck,
   phase,
   hidden,
   slotRef,
   onSelect,
+  mini = false,
+  layout = true,
+  phone,
 }: {
   deck: DeckData;
   phase: Phase;
   hidden: boolean; // still in the air (see DeckToss)
-  slotRef: (el: HTMLDivElement | null) => void;
+  slotRef?: (el: HTMLDivElement | null) => void;
   onSelect: () => void;
+  mini?: boolean; // dock size
+  layout?: boolean; // cards deal from / gather into this deck (shared layoutIds)
+  phone: boolean;
 }) {
   const style = DECK_STYLES[deck.id];
   const count = deck.cards.length;
   const dealt = phase === "dealt";
+  const fit = deckFit(style.shape, mini, phone);
+  const lift = stackOffset(count - 1, count, mini);
+  // In the phone dock, cards gathering back slide in *under* the dock's frosted
+  // background (see DeckDock); every other deck, and all labels, sit above it.
+  const under = mini && layout && phase === "collecting";
+  // A deck that doesn't deal only needs to look like a deck: its top three cards.
+  const stack = layout ? deck.cards : deck.cards.slice(-3);
 
   return (
     <button
@@ -416,37 +545,58 @@ function Deck({
       onClick={onSelect}
       aria-pressed={dealt}
       aria-label={`${deck.label} deck, ${count} ${count === 1 ? "card" : "cards"}${dealt ? ", dealt" : ""}`}
-      className="group flex cursor-pointer flex-col items-center gap-4 outline-none"
+      className={`group flex cursor-pointer flex-col items-center outline-none ${mini ? "gap-1.5" : "gap-4"}`}
     >
-      <div style={{ borderRadius: CARD_RADIUS, visibility: hidden ? "hidden" : undefined }}>
+      <div
+        className={mini && !under ? "relative z-20" : undefined}
+        style={{ borderRadius: fit.radius, visibility: hidden ? "hidden" : undefined }}
+      >
         <div
           ref={slotRef}
-          className={`relative transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 ${SIZE[style.shape].deck}`}
+          data-slot={deck.id}
+          className="relative transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1"
+          style={{ width: fit.slotW, height: fit.slotH }}
         >
           {/* Empty slot, visible once the deck is dealt out. */}
-          <div className="absolute inset-0 rounded-[10px] border border-dashed border-ivory/20 transition-colors group-hover:border-highlight/70" />
+          <div
+            className={`absolute inset-0 border border-dashed transition-colors group-hover:border-highlight/70 ${
+              dealt && mini ? "border-highlight/80" : "border-ivory/20"
+            }`}
+            style={{ borderRadius: fit.radius }}
+          />
           {!dealt &&
-            deck.cards.map((card, i) => {
-              const offset = Math.min(i, 7) * 1.5;
+            stack.map((card, j) => {
+              const i = count - stack.length + j;
               return (
                 <motion.div
                   key={card.id}
-                  layoutId={card.id}
-                  className={`absolute h-full w-full ${i === count - 1 ? HIGHLIGHT : ""}`}
-                  style={{ top: -offset, left: offset * 0.4, zIndex: i, borderRadius: CARD_RADIUS }}
+                  layoutId={layout ? card.id : undefined}
+                  className="absolute"
+                  style={{ ...cardPlacement(fit, i, count, mini), zIndex: i, borderRadius: CARD_RADIUS, scale: fit.scale }}
                   transition={{ layout: spring(i * COLLECT_STAGGER) }}
                 >
                   <CardBack style={style} label={`${deck.label} card`} />
                 </motion.div>
               );
             })}
+          {/* Hover/focus ring around the top card, drawn at its on-screen size. */}
+          {!dealt && (
+            <div
+              className={`pointer-events-none absolute inset-0 ${mini ? MINI_HIGHLIGHT : HIGHLIGHT}`}
+              style={{ translate: `${lift.x}px ${lift.y}px`, borderRadius: fit.radius, zIndex: count }}
+            />
+          )}
         </div>
       </div>
       <motion.span
         initial={{ opacity: 0 }}
         animate={{ opacity: hidden ? 0 : 1 }}
         transition={{ duration: 0.3 }}
-        className="font-mono text-xs uppercase tracking-[0.22em] text-ivory/70 transition-colors group-hover:text-highlight group-focus-visible:text-highlight sm:text-sm"
+        className={`whitespace-nowrap font-mono uppercase transition-colors group-hover:text-highlight group-focus-visible:text-highlight ${
+          mini
+            ? `relative z-20 text-[9px] tracking-[0.14em] ${dealt ? "text-highlight" : "text-ivory/70"}`
+            : "text-xs tracking-[0.22em] text-ivory/70 sm:text-sm"
+        }`}
       >
         {deck.label}
       </motion.span>
@@ -454,71 +604,89 @@ function Deck({
   );
 }
 
+const MINI_HIGHLIGHT =
+  "outline-2 outline-offset-2 outline-transparent transition-[outline-color] group-hover:outline-highlight group-focus-visible:outline-highlight";
+
 /**
- * Mini decks that stay reachable once the real ones have scrolled away: along the
- * bottom edge on phones (where thumbs are), the top on wider screens. The minis are
- * the real card backs drawn at deck size and scaled down, so they match exactly.
+ * The decks as a compact strip. On phones it is the deck menu: pinned to the bottom
+ * edge (where thumbs are), holding the real decks, so cards deal out of and gather
+ * back into it. On wider screens it's a shortcut along the top that appears once the
+ * decks on the table have scrolled away; there it only shows the decks.
  */
 function DeckDock({
   decks,
-  active,
+  phone,
+  phaseOf,
   shown,
+  inAir,
+  slotRef,
   onSelect,
 }: {
   decks: DeckData[];
-  active: DeckId | null;
+  phone: boolean;
+  phaseOf: (id: DeckId) => Phase;
   shown: boolean;
+  inAir: (id: DeckId) => boolean;
+  slotRef?: (id: DeckId) => (el: HTMLElement | null) => void;
   onSelect: (id: DeckId) => void;
 }) {
+  // While a deck gathers under the frosted background, cut a window over its slot so
+  // each card shows as it drops in, instead of the whole deck popping up at the end.
+  const panel = useRef<HTMLDivElement>(null);
+  const gathering = phone ? decks.find((d) => phaseOf(d.id) === "collecting")?.id : undefined;
+  const [hole, setHole] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const box = panel.current;
+    const slot = gathering && box?.querySelector<HTMLElement>(`[data-slot="${gathering}"]`);
+    if (!box || !slot) return setHole(null);
+    const b = box.getBoundingClientRect();
+    const r = slot.getBoundingClientRect();
+    // A little extra above and to the right for the stacked cards' offsets.
+    setHole({ x: r.left - b.left - 1, y: r.top - b.top - 7, w: r.width + 4, h: r.height + 8 });
+  }, [gathering]);
+  const mask: CSSProperties | undefined = hole
+    ? {
+        maskImage: "linear-gradient(#000 0 0), linear-gradient(#000 0 0)",
+        maskSize: `100% 100%, ${hole.w}px ${hole.h}px`,
+        maskPosition: `0 0, ${hole.x}px ${hole.y}px`,
+        maskRepeat: "no-repeat",
+        maskComposite: "exclude",
+      }
+    : undefined;
+
   return (
     <nav
       aria-label="Decks"
       inert={!shown}
       className={`fixed inset-x-0 bottom-[max(12px,env(safe-area-inset-bottom))] z-40 flex justify-center px-4 transition-[translate,opacity] duration-300 ease-out sm:top-4 sm:bottom-auto ${
-        shown ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-6 opacity-0 sm:-translate-y-6"
+        // Fades only on phones: the decks are measured to land in it as it appears.
+        shown ? "translate-y-0 opacity-100" : "pointer-events-none opacity-0 sm:-translate-y-6"
       }`}
     >
-      <ul className="flex items-end gap-3 rounded-2xl border border-ivory/10 bg-felt-deep/85 px-4 pb-2 pt-3 shadow-[0_8px_24px_rgba(0,0,0,.45)] backdrop-blur-md sm:gap-5 sm:px-5">
-        {decks.map((deck) => {
-          const style = DECK_STYLES[deck.id];
-          const landscape = style.shape === "landscape";
-          const on = active === deck.id;
-          return (
+      {/* The background is its own layer (z-10) so cards can pass under it. */}
+      <div ref={panel} className="relative isolate">
+        <div
+          style={mask}
+          className="pointer-events-none absolute inset-0 z-10 rounded-2xl border border-ivory/10 bg-felt-deep/85 shadow-[0_8px_24px_rgba(0,0,0,.45)] backdrop-blur-md"
+          aria-hidden
+        />
+        <ul className="flex items-end gap-3 px-4 pb-2 pt-3 sm:gap-5 sm:px-5">
+          {decks.map((deck) => (
             <li key={deck.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(deck.id)}
-                aria-pressed={on}
-                aria-label={`${deck.label} deck${on ? ", dealt" : ""}`}
-                className="group flex cursor-pointer flex-col items-center gap-1.5 outline-none"
-              >
-                {/* Card drawn at phone deck size (96 or 134px wide), shown at 40%. */}
-                <span
-                  className={`relative block rounded-[4px] outline-2 outline-offset-2 transition-[outline-color,translate] group-hover:-translate-y-0.5 group-hover:outline-highlight group-focus-visible:outline-highlight ${
-                    on ? "outline-highlight" : "outline-transparent"
-                  } ${landscape ? "h-[30.6px] w-[53.6px]" : "h-[53.8px] w-[38.4px]"}`}
-                  aria-hidden
-                >
-                  <span
-                    className={`absolute left-0 top-0 origin-top-left scale-[0.4] ${
-                      landscape ? "aspect-[7/4] w-[134px]" : "aspect-[5/7] w-[96px]"
-                    }`}
-                  >
-                    <CardBack style={style} label="" />
-                  </span>
-                </span>
-                <span
-                  className={`whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.14em] transition-colors group-hover:text-highlight group-focus-visible:text-highlight ${
-                    on ? "text-highlight" : "text-ivory/70"
-                  }`}
-                >
-                  {deck.label}
-                </span>
-              </button>
+              <Deck
+                deck={deck}
+                phase={phaseOf(deck.id)}
+                hidden={inAir(deck.id)}
+                slotRef={slotRef?.(deck.id)}
+                onSelect={() => onSelect(deck.id)}
+                mini
+                layout={phone}
+                phone={phone}
+              />
             </li>
-          );
-        })}
-      </ul>
+          ))}
+        </ul>
+      </div>
     </nav>
   );
 }

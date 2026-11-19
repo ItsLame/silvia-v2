@@ -19,18 +19,18 @@ export const DECK_STYLES: Record<DeckId, DeckStyle> = {
   games: { suit: "♣", red: false, back: "#111111", trim: "#ffffff", shape: "portrait", variant: "uno" },
 };
 
-// Card sizes. Deck = on the table edge. Dealt = laid out to read. (Cards inside the
-// deck box are sized in deck-box.tsx.) Phone widths fit three decks / two dealt
-// cards per row in a 375px screen.
+// Card sizes, in px. Dealt = laid out to read, sized for phones and for wider screens
+// (Tailwind's `sm`); the classes below must match. A deck is drawn with full dealt-size
+// cards scaled down into its slot, so a card flying between a deck and the spread is
+// only ever scaled down: it stays sharp and looks the same at both ends. Slot widths:
+// on the table (wider screens only) and in the dock of mini decks.
 export const SIZE = {
-  portrait: {
-    deck: "w-[96px] sm:w-[136px] aspect-[5/7]",
-    dealt: "w-[158px] sm:w-[236px] aspect-[5/7]",
-  },
-  landscape: {
-    deck: "w-[134px] sm:w-[190px] aspect-[7/4]",
-    dealt: "w-[330px] sm:w-[460px] aspect-[7/4]",
-  },
+  portrait: { dealt: "w-[158px] sm:w-[236px] aspect-[5/7]" },
+  landscape: { dealt: "w-[330px] sm:w-[460px] aspect-[7/4]" },
 } as const;
+export const DEALT_W = { portrait: { phone: 158, wide: 236 }, landscape: { phone: 330, wide: 460 } } as const;
+export const DECK_W = { portrait: 136, landscape: 190 } as const;
+export const MINI_W = { portrait: 38, landscape: 54 } as const;
+export const ASPECT = { portrait: 7 / 5, landscape: 4 / 7 } as const; // height / width
 
 export const CARD_RADIUS = 10;
