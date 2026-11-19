@@ -85,16 +85,33 @@ function useIsPhone() {
   );
 }
 
-export function CardTable({ name, headline, decks }: { name: string; headline: string; decks: DeckData[] }) {
-  const [stage, setStage] = useState<Stage>("box");
-  const [boxGone, setBoxGone] = useState(false);
+// The Mini Games deck has its own address: while it's dealt the URL reads /games, so
+// Back from a game (or a reload) returns to the table with the games laid out.
+const DECK_PATHS: Partial<Record<DeckId, string>> = { games: "/games" };
+
+export function CardTable({
+  name,
+  headline,
+  decks,
+  initialDeck,
+}: {
+  name: string;
+  headline: string;
+  decks: DeckData[];
+  /** Start with the box already open and this deck dealt (e.g. /games). */
+  initialDeck?: DeckId;
+}) {
+  const [stage, setStage] = useState<Stage>(initialDeck ? "table" : "box");
+  const [boxGone, setBoxGone] = useState(!!initialDeck);
   // The box's opening (decks come out from there) and each deck's slot (they land there).
   const boxOpening = useRef<HTMLDivElement>(null);
   const [tossFrom, setTossFrom] = useState<{ x: number; y: number } | null>(null);
   const deckSlots = useRef(new Map<DeckId, HTMLElement>());
   const [landed, setLanded] = useState<Set<DeckId>>(new Set());
-  const [tossDone, setTossDone] = useState(false);
-  const [state, setState] = useState<TableState>({ deck: null, phase: "idle" });
+  const [tossDone, setTossDone] = useState(!!initialDeck);
+  const [state, setState] = useState<TableState>(
+    initialDeck ? { deck: initialDeck, phase: "dealt" } : { deck: null, phase: "idle" },
+  );
   const stateRef = useRef(state);
   const timers = useRef<number[]>([]);
   const spreadRef = useRef<HTMLElement>(null);
@@ -114,6 +131,14 @@ export function CardTable({ name, headline, decks }: { name: string; headline: s
     timers.current.push(window.setTimeout(fn, seconds * 1000));
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  // Keep the address bar in step with the dealt deck (see DECK_PATHS). Replaces rather
+  // than pushes, so dealing and gathering don't fill the Back history.
+  useEffect(() => {
+    if (stage !== "table" || state.phase === "collecting") return;
+    const path = (state.phase === "dealt" && state.deck && DECK_PATHS[state.deck]) || "/";
+    if (window.location.pathname !== path) window.history.replaceState(null, "", path);
+  }, [stage, state]);
 
   useEffect(() => {
     const row = decksRef.current;

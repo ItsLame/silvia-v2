@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type { DeckStyle } from "./deck-styles";
 import type { CardData } from "./types";
@@ -22,17 +23,19 @@ function UnoShell({
   oval,
   ovalSize = "h-[88%] w-[66%]",
   flipped,
+  passive,
   children,
 }: {
   color: string;
   oval: string;
   ovalSize?: string;
   flipped?: boolean;
+  passive?: boolean; // a back: must not swallow clicks meant for the face in the same plane
   children: ReactNode;
 }) {
   return (
     <div
-      className={`${face} ${flipped ? "rotate-y-180" : ""} @container bg-white p-[5%] shadow-[0_2px_6px_rgba(0,0,0,.35)]`}
+      className={`${face} ${flipped ? "rotate-y-180" : ""} ${passive ? "pointer-events-none" : ""} @container bg-white p-[5%] shadow-[0_2px_6px_rgba(0,0,0,.35)]`}
     >
       <div className="relative h-full w-full overflow-hidden rounded-[7px]" style={{ background: color }}>
         <div
@@ -59,7 +62,7 @@ const unoLogo = (size: string): CSSProperties => ({
 function UnoBack({ label }: { label: string }) {
   return (
     // Oval nearly fills the field, as on a real UNO card.
-    <UnoShell color="#0b0b0b" oval={UNO_RED} ovalSize="h-[100%] w-[74%]">
+    <UnoShell color="#0b0b0b" oval={UNO_RED} ovalSize="h-[100%] w-[74%]" passive>
       {/* Two lines, staggered along the oval (MINI up-right, GAMES down-left) so the
           lettering fills it, spilling slightly past the edges like the UNO logo. */}
       <div className="absolute inset-0 grid -rotate-[20deg] place-items-center" aria-hidden>
@@ -81,6 +84,7 @@ function UnoFace({ card, index }: { card: CardData; index: number }) {
   const color = UNO_FACE_COLORS[index % UNO_FACE_COLORS.length];
   const n = String(index + 1);
   const corner = "absolute font-sans font-black italic leading-none";
+  if (card.kind === "game") return <UnoGameFace card={card} color={color} n={n} corner={corner} />;
   return (
     <UnoShell color={color} oval="#fff" flipped>
       <span className={`${corner} left-[7%] top-[5%]`} style={unoType("15cqw", "#fff")} aria-hidden>
@@ -99,6 +103,54 @@ function UnoFace({ card, index }: { card: CardData; index: number }) {
           </span>
         </div>
       </div>
+    </UnoShell>
+  );
+}
+
+// A playable game: its name on the oval, and the whole card is the link to it.
+function UnoGameFace({
+  card,
+  color,
+  n,
+  corner,
+}: {
+  card: Extract<CardData, { kind: "game" }>;
+  color: string;
+  n: string;
+  corner: string;
+}) {
+  return (
+    <UnoShell color={color} oval="#fff" flipped>
+      <span className={`${corner} left-[7%] top-[5%]`} style={unoType("15cqw", "#fff")} aria-hidden>
+        {n}
+      </span>
+      <span className={`${corner} bottom-[5%] right-[7%] rotate-180`} style={unoType("15cqw", "#fff")} aria-hidden>
+        {n}
+      </span>
+      {/* The whole card is the link. */}
+      <Link
+        href={card.href}
+        aria-label={`Play ${card.title}: ${card.blurb}`}
+        className="group/game absolute inset-0 flex flex-col items-center justify-center rounded-[7px] px-[14%] text-center focus-visible:outline-3 focus-visible:-outline-offset-3 focus-visible:outline-highlight"
+      >
+        <span
+          className="-rotate-[8deg] font-sans font-black italic leading-[0.9] tracking-[-0.02em]"
+          style={unoType("15cqw", color)}
+          aria-hidden
+        >
+          {card.title}
+        </span>
+        <span className="mt-[5cqw] leading-snug text-ink/70" style={{ fontSize: "5.6cqw" }} aria-hidden>
+          {card.blurb}
+        </span>
+        <span
+          className="mt-[5cqw] rounded-full bg-ink px-[5cqw] py-[1.6cqw] font-mono uppercase tracking-[0.18em] text-white transition-transform group-hover/game:scale-105 group-focus-visible/game:scale-105"
+          style={{ fontSize: "5cqw" }}
+          aria-hidden
+        >
+          Play ▸
+        </span>
+      </Link>
     </UnoShell>
   );
 }

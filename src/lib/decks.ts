@@ -1,5 +1,6 @@
 import type { CardData, DeckData } from "@/components/table/types";
 import { getProfile, getProjects } from "./content";
+import { GAMES } from "./games";
 
 const placeholders = (deck: string, label: string, count: number): CardData[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -39,6 +40,20 @@ export function getDecks(): DeckData[] {
         },
       ],
     },
-    { id: "games", label: "Mini Games", cards: placeholders("games", "Game", 3) },
+    {
+      id: "games",
+      label: "Mini Games",
+      // Real games first, then "coming soon" cards so the deck never looks thin.
+      cards: [
+        ...GAMES.map((g): CardData => ({
+          kind: "game",
+          id: `game-${g.slug}`,
+          title: g.title,
+          blurb: g.blurb,
+          href: `/games/${g.slug}`,
+        })),
+        ...placeholders("games", "Coming soon", Math.max(0, 3 - GAMES.length)).map((c) => ({ ...c, title: "Coming soon" })),
+      ],
+    },
   ];
 }

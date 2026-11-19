@@ -3,6 +3,7 @@ export type DeckId = "about" | "work" | "projects" | "contact" | "games";
 export type CardData =
   | { kind: "placeholder"; id: string; title: string }
   | { kind: "project"; id: string; title: string; description: string; tags: string[] }
+  | { kind: "game"; id: string; title: string; blurb: string; href: string }
   | {
       kind: "contact";
       id: string;
