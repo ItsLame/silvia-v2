@@ -63,3 +63,28 @@ body {
     radial-gradient(ellipse at 50% 30%, var(--color-felt) 0%, var(--color-felt-deep) 85%);
   background-attachment: fixed;
 }
+
+/* Wordfall: a cleared word card pops, score popups float up, level banners fade. */
+@theme {
+  --animate-wf-pop: wf-pop 0.4s ease-out forwards;
+  --animate-wf-float: wf-float 0.9s ease-out forwards;
+  --animate-wf-banner: wf-banner 2.4s ease-out forwards;
+
+  @keyframes wf-pop {
+    0% { transform: scale(1); opacity: 1; }
+    35% { transform: scale(1.18) rotate(-4deg); opacity: 1; }
+    100% { transform: scale(0.6) rotate(8deg) translateY(-12px); opacity: 0; }
+  }
+  @keyframes wf-float {
+    0% { transform: translate(-50%, 0); opacity: 0; }
+    15% { opacity: 1; }
+    100% { transform: translate(-50%, -48px); opacity: 0; }
+  }
+  @keyframes wf-banner {
+    0% { transform: scale(0.7); opacity: 0; }
+    12% { transform: scale(1.06); opacity: 1; }
+    20% { transform: scale(1); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-10px); }
+  }
+}

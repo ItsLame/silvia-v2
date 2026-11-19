@@ -1,9 +1,14 @@
+// Games dealt from the Mini Games deck, in deck order. Each lives at /games/<slug>.
 export type Game = {
   slug: string;
   title: string;
   blurb: string;
-  /** Suit shown on the game's card in the index. */
-  suit: "♠" | "♥" | "♦" | "♣";
 };
 
-export const GAMES: Game[] = [];
+export const GAMES: Game[] = [
+  {
+    slug: "wordfall",
+    title: "Wordfall",
+    blurb: "Type the falling words before the stacks reach the top.",
+  },
+];
