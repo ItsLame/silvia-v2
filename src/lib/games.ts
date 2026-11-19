@@ -6,11 +6,4 @@ export type Game = {
   suit: "♠" | "♥" | "♦" | "♣";
 };
 
-export const GAMES: Game[] = [
-  {
-    slug: "jack-sprint",
-    title: "Jack Sprint",
-    blurb: "Steer each thigh and knee of a wobbly playing card down a 100 m track.",
-    suit: "♥",
-  },
-];
+export const GAMES: Game[] = [];
