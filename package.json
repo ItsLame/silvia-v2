@@ -15,6 +15,7 @@
   "dependencies": {
     "motion": "^14.14.0",
     "next": "16.4.6",
+    "planck": "1.5.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "rehype-pretty-code": "^0.14.6",
