@@ -12,6 +12,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import { type Channel, GameAudio, readMuted, subscribeMuted } from "./audio";
+import { AuthForm, Modal, type Player, usePlayer } from "../../account";
+import { Leaderboard, type Standing, scores } from "../leaderboard";
 import { Help } from "./help";
 import {
   CARD_H,
@@ -77,6 +79,12 @@ const snapshot = (e: Engine): Snap => ({
 });
 
 type Result = { score: number; level: number; words: number; accuracy: number; wpm: number; bestStreak: number };
+type PostState =
+  | { kind: "idle" }
+  | { kind: "signedOut" }
+  | { kind: "posting" }
+  | { kind: "posted"; week: Standing; all: Standing }
+  | { kind: "error"; message: string };
 type Best = { score: number; level: number; wpm: number };
 const BEST_KEY = "wordfall:best";
 function recordBest(r: Result): { best: Best; isNew: boolean } {
@@ -128,6 +136,44 @@ export function Wordfall() {
     helpOpenRef.current = open;
     setHelpOpenState(open);
   }, []);
+  // Leaderboard: who's signed in, this game's ticket, and posting the final score.
+  const [player, setPlayerState] = usePlayer();
+  const playerRef = useRef<Player | null | undefined>(undefined);
+  const setPlayer = useCallback(
+    (p: Player | null) => {
+      playerRef.current = p;
+      setPlayerState(p);
+    },
+    [setPlayerState],
+  );
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
+  const runRef = useRef<Promise<string | null> | null>(null);
+  const finalRef = useRef<Record<string, number> | null>(null);
+  const [post, setPost] = useState<PostState>({ kind: "idle" });
+  const [modal, setModalState] = useState<null | "leaderboard" | "auth">(null);
+  const modalRef = useRef(false);
+  const setModal = useCallback((m: null | "leaderboard" | "auth") => {
+    modalRef.current = m !== null;
+    setModalState(m);
+  }, []);
+
+  const postScore = useCallback(async () => {
+    const final = finalRef.current;
+    const runId = await runRef.current;
+    if (!final || !runId) return setPost({ kind: "error", message: "This game can't be posted. Try the next one." });
+    setPost({ kind: "posting" });
+    const r = await scores.postScore("wordfall", { ...final, runId });
+    if (!r.ok && r.status === 401) {
+      // Signed out on the server since the page loaded: offer to sign in again.
+      setPlayer(null);
+      return setPost({ kind: "signedOut" });
+    }
+    if (!r.ok) return setPost({ kind: "error", message: r.error });
+    setPost({ kind: "posted", week: r.data.week, all: r.data.all });
+  }, [setPlayer]);
+
   const sfxMuted = useMuted("sfx");
   const musicMuted = useMuted("music");
 
@@ -191,12 +237,22 @@ export function Wordfall() {
             setResult({ result: r, ...recordBest(r) });
             setTyped("");
             setPhase("over");
+            finalRef.current = {
+              score: r.score,
+              level: r.level,
+              words: r.words,
+              wpm: Math.min(300, r.wpm),
+              accuracy: r.accuracy,
+              durationMs: Math.round(e.playTime * 1000),
+            };
+            if (playerRef.current) void postScore();
+            else setPost({ kind: "signedOut" });
             break;
           }
         }
       }
     },
-    [setPhase, setTyped],
+    [setPhase, setTyped, postScore],
   );
 
   // A fresh game: new engine, and nothing carried over from the last one (typed text,
@@ -214,6 +270,10 @@ export function Wordfall() {
     setSnap(snapshot(e));
     setResult(null);
     setTyped("");
+    setPost({ kind: "idle" });
+    finalRef.current = null;
+    // The server's ticket for this game; it bounds what the final score can be.
+    runRef.current = scores.startRun("wordfall").then((r) => (r.ok ? r.data.runId : null));
     setPhase("playing");
     a.play("start");
     a.setTempo(tempoFor(1));
@@ -241,6 +301,11 @@ export function Wordfall() {
     pause();
     setHelpOpen(true);
   }, [pause, setHelpOpen]);
+
+  const openLeaderboard = useCallback(() => {
+    pause();
+    setModal("leaderboard");
+  }, [pause, setModal]);
 
   const togglePause = () => (phaseRef.current === "paused" ? resume() : pause());
 
@@ -271,7 +336,7 @@ export function Wordfall() {
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-      if (helpOpenRef.current) return; // the dialog has the keyboard (Esc closes it)
+      if (helpOpenRef.current || modalRef.current) return; // a dialog has the keyboard (Esc closes it)
       if (ev.key === "?") {
         ev.preventDefault();
         openHelp();
@@ -392,6 +457,11 @@ export function Wordfall() {
         </Link>
         <h1 className="font-display text-3xl leading-none sm:text-4xl">Wordfall</h1>
         <div className="flex">
+          <span className="max-sm:hidden">
+            <IconButton label="Leaderboard" onClick={openLeaderboard}>
+              <path d="M8 4h8v5a4 4 0 01-8 0V4zM8 6H5a3 3 0 003 4M16 6h3a3 3 0 01-3 4M12 13v4M8.5 20h7M10 17h4v3h-4z" strokeLinejoin="round" strokeLinecap="round" />
+            </IconButton>
+          </span>
           <IconButton label="How to play" onClick={openHelp}>
             <circle cx="12" cy="12" r="9" />
             <path d="M9.6 9.4a2.5 2.5 0 114.2 1.8c-.9.7-1.8 1.2-1.8 2.5" strokeLinecap="round" />
@@ -550,6 +620,7 @@ export function Wordfall() {
             </p>
             <div className="mt-4 flex gap-5">
               <TextButton onClick={openHelp}>How to play</TextButton>
+              <TextButton onClick={openLeaderboard}>Leaderboard</TextButton>
             </div>
           </Overlay>
         )}
@@ -575,10 +646,34 @@ export function Wordfall() {
           </Overlay>
         )}
 
-        {phase === "over" && result && <GameOver {...result} onAgain={start} />}
+        {phase === "over" && result && (
+          <GameOver
+            {...result}
+            post={post}
+            onAgain={start}
+            onLeaderboard={() => setModal("leaderboard")}
+            onSignIn={() => setModal("auth")}
+          />
+        )}
       </div>
 
       <Help open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <Modal open={modal === "leaderboard"} onClose={() => setModal(null)} title="Leaderboard">
+        {modal === "leaderboard" && <Leaderboard game="wordfall" player={player} onPlayer={setPlayer} />}
+      </Modal>
+      <Modal open={modal === "auth"} onClose={() => setModal(null)} title="Post your score" width={420}>
+        {modal === "auth" && (
+          <AuthForm
+            onDone={(p) => {
+              setPlayer(p);
+              setModal(null);
+              void postScore();
+            }}
+            intro={<p className="mb-4 text-ivory/70">Sign in, or pick a name, to put this game on the leaderboard.</p>}
+          />
+        )}
+      </Modal>
+
       <SpellRack rack={s?.rack ?? []} typed={phase === "playing" ? typed : ""} onCast={castSpell} />
 
       {/* Typing line. */}
@@ -788,7 +883,51 @@ function TextButton({ onClick, children }: { onClick: () => void; children: Reac
   );
 }
 
-function GameOver({ result, best, isNew, onAgain }: { result: Result; best: Best; isNew: boolean; onAgain: () => void }) {
+function PostStatus({ post, score, onSignIn }: { post: PostState; score: number; onSignIn: () => void }) {
+  const line = "mt-3 text-sm";
+  switch (post.kind) {
+    case "idle":
+      return null;
+    case "signedOut":
+      return (
+        <button
+          type="button"
+          onClick={onSignIn}
+          className="mt-3 cursor-pointer rounded-full border border-ivory/30 px-4 py-1.5 text-sm text-ivory transition-colors hover:border-highlight hover:text-highlight"
+        >
+          Sign in to post this score
+        </button>
+      );
+    case "posting":
+      return <p className={`${line} text-ivory/60`}>Posting to the leaderboard…</p>;
+    case "error":
+      return <p className={`${line} text-red-300`}>{post.message}</p>;
+    case "posted": {
+      const place = (s: Standing, label: string) =>
+        s ? (s.score === score ? `#${s.rank} ${label}` : `best ${label} still #${s.rank}`) : null;
+      const parts = [place(post.week, "this week"), place(post.all, "all time")].filter(Boolean);
+      return <p className={`${line} text-highlight`}>Posted · {parts.join(" · ")}</p>;
+    }
+  }
+}
+
+function GameOver({
+  result,
+  best,
+  isNew,
+  post,
+  onAgain,
+  onLeaderboard,
+  onSignIn,
+}: {
+  result: Result;
+  best: Best;
+  isNew: boolean;
+  post: PostState;
+  onAgain: () => void;
+  onLeaderboard: () => void;
+  onSignIn: () => void;
+}) {
   const rank = rankFor(result.score);
   const stats: [string, string][] = [
     ["Level", String(result.level)],
@@ -823,7 +962,11 @@ function GameOver({ result, best, isNew, onAgain }: { result: Result; best: Best
       {rank.next && (
         <p className="mt-3 text-xs text-ivory/50">{(rank.next - result.score).toLocaleString()} more for the next rank</p>
       )}
+      <PostStatus post={post} score={result.score} onSignIn={onSignIn} />
       <StartButton onClick={onAgain}>Deal again</StartButton>
+      <div className="mt-3">
+        <TextButton onClick={onLeaderboard}>Leaderboard</TextButton>
+      </div>
     </Overlay>
   );
 }

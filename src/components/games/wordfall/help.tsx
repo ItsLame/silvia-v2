@@ -136,6 +136,11 @@ export function Help({ open, onClose }: { open: boolean; onClose: () => void }) 
                 Finish a level without missing a card or sending a wrong word for a <strong className="text-ivory">clean hand</strong> bonus.
               </li>
               <li>When the game ends, your score becomes a card rank, from Two of Hearts up to Ace.</li>
+              <li>
+                Sign in from the <strong className="text-ivory">Leaderboard</strong> to post your scores. Your best game
+                counts, both this week (from Monday 00:00 UTC) and all time. Typing speed counts the time there&apos;s a
+                card on the board to type, so it includes reading and choosing, not just keystrokes.
+              </li>
             </ul>
           </section>
 

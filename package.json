@@ -10,9 +10,11 @@
     "content": "velite build --strict",
     "predev": "velite build --strict",
     "prebuild": "velite build --strict",
-    "typecheck": "velite build --strict && tsc --noEmit"
+    "typecheck": "velite build --strict && tsc --noEmit",
+    "db:migrate": "node --env-file=.env.local scripts/db-migrate.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.1",
     "motion": "^14.14.0",
     "next": "16.4.6",
     "react": "19.3.0",
