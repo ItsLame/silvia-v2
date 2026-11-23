@@ -1,5 +1,6 @@
 // Applies db/schema.sql to the database in DATABASE_URL.
-// Run with: pnpm db:migrate  (loads .env.local; pull it first with `vercel env pull`)
+//   pnpm db:migrate        development and preview database (.env.local, from `vercel env pull`)
+//   pnpm db:migrate:prod   production database (.env.vercel-production, from `pnpm env:pull:prod`)
 import { readFile } from "node:fs/promises";
 import { neon } from "@neondatabase/serverless";
 
