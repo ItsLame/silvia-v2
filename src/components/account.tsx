@@ -129,7 +129,7 @@ export function AuthForm({ onDone, intro }: { onDone: (p: Player) => void; intro
             }}
             className={`cursor-pointer rounded-full py-1.5 transition-colors ${mode === m ? "bg-ivory text-ink" : "text-ivory/70 hover:text-ivory"}`}
           >
-            {m === "login" ? "Sign in" : "New name"}
+            {m === "login" ? "Sign in" : "Sign up"}
           </button>
         ))}
       </div>
@@ -177,7 +177,7 @@ export function AuthForm({ onDone, intro }: { onDone: (p: Player) => void; intro
         disabled={busy}
         className="mt-4 w-full cursor-pointer rounded-full bg-ivory py-2.5 font-medium text-ink transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
       >
-        {busy ? "One moment…" : mode === "login" ? "Sign in" : "Claim name"}
+        {busy ? "One moment…" : mode === "login" ? "Sign in" : "Sign up"}
       </button>
     </form>
   );
