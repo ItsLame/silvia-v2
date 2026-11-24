@@ -10,9 +10,15 @@
     "content": "velite build --strict",
     "predev": "velite build --strict",
     "prebuild": "velite build --strict",
-    "typecheck": "velite build --strict && tsc --noEmit"
+    "typecheck": "velite build --strict && tsc --noEmit",
+    "db:migrate": "node --env-file=.env.local scripts/db-migrate.mjs",
+    "claim-name": "node --no-warnings --env-file=.env.local scripts/claim-name.mts",
+    "db:migrate:prod": "node --env-file=.env.vercel-production scripts/db-migrate.mjs",
+    "claim-name:prod": "node --no-warnings --env-file=.env.vercel-production scripts/claim-name.mts",
+    "env:pull:prod": "vercel env pull .env.vercel-production --environment=production --yes"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.1",
     "motion": "^14.14.0",
     "next": "16.4.6",
     "react": "19.3.0",
