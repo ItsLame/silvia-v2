@@ -15,6 +15,7 @@ import { type Channel, GameAudio, readMuted, subscribeMuted } from "./audio";
 import { AuthForm, Modal, type Player, usePlayer } from "../../account";
 import { Leaderboard, type Standing, scores } from "../leaderboard";
 import { Help } from "./help";
+import { WordfallLogo } from "./logo";
 import {
   CARD_H,
   Engine,
@@ -455,7 +456,10 @@ export function Wordfall() {
         >
           ← <span className="max-sm:hidden">Mini </span>Games
         </Link>
-        <h1 className="font-display text-3xl leading-none sm:text-4xl">Wordfall</h1>
+        {/* The logo's bottom padding (room for its lowest tile) hangs below the row. */}
+        <h1 className="-mb-[0.6em] text-[14.5px] leading-none sm:text-[22px]">
+          <WordfallLogo />
+        </h1>
         <div className="flex">
           <span className="max-sm:hidden">
             <IconButton label="Leaderboard" onClick={openLeaderboard}>
@@ -593,7 +597,7 @@ export function Wordfall() {
 
         {phase === "title" && (
           <Overlay>
-            <p className="font-display text-5xl sm:text-6xl">Wordfall</p>
+            <WordfallLogo size="44px" intro />
             <p className="mt-3 max-w-xs text-sm text-ivory/75">
               Type a falling word and press <Kbd>Space</Kbd> to clear it. Missed cards stack up at the bottom. If
               the pile reaches the limit line, the game is over.

@@ -88,3 +88,170 @@ body {
     100% { opacity: 0; transform: translateY(-10px); }
   }
 }
+
+/* Wordfall logo (components/games/wordfall/logo.tsx). Tile offsets and tilts are in em
+   so the logo scales with its font size. */
+.wfl {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.08em;
+  padding-bottom: 0.6em; /* room for the lowest tile */
+  font-family: var(--font-mono);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  transform: rotate(-8deg);
+}
+.wfl-chip {
+  padding: 0.14em 0.22em;
+  border-radius: 0.14em;
+  background: var(--color-ivory);
+  color: var(--color-ink);
+  box-shadow: 0 0.06em 0.16em rgb(0 0 0 / 0.45);
+}
+.wfl[data-on="light"] .wfl-chip {
+  box-shadow:
+    0 0 0 0.05em var(--color-ink),
+    0 0.06em 0.16em rgb(0 0 0 / 0.3);
+}
+.wfl-tile {
+  display: inline-block;
+  padding: 0.14em 0.15em;
+  border-radius: 0.14em;
+  color: var(--color-ivory);
+  box-shadow: 0 0.06em 0.16em rgb(0 0 0 / 0.45);
+  transform: translateY(var(--y)) rotate(var(--r));
+}
+/* Spell colours: wipe, ice, slow, mend. */
+.wfl-t1 { --i: 0; --y: 0.08em; --r: 3deg; background: #1f1b16; }
+.wfl-t2 { --i: 1; --y: 0.22em; --r: -5deg; background: #2563eb; }
+.wfl-t3 { --i: 2; --y: 0.4em; --r: 7deg; background: #15803d; }
+.wfl-t4 { --i: 3; --y: 0.6em; --r: -11deg; background: #b3261e; }
+/* f, a, l, l drop in 70 ms apart (the step the decks are tossed with), land a hair
+   past their spot, bounce back and settle. */
+.wfl[data-intro] .wfl-tile {
+  animation: wfl-drop 0.56s both;
+  animation-delay: calc(var(--wfl-delay, 0.15s) + var(--i) * 70ms);
+}
+@keyframes wfl-drop {
+  0% {
+    transform: translateY(calc(var(--y) - 1.6em)) rotate(0deg);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.55, 0, 0.8, 0.2);
+  }
+  20% { opacity: 1; }
+  57% {
+    transform: translateY(calc(var(--y) + 0.1em)) rotate(calc(var(--r) * 0.6));
+    animation-timing-function: ease-out;
+  }
+  78% {
+    transform: translateY(calc(var(--y) - 0.07em)) rotate(calc(var(--r) * 1.15));
+    animation-timing-function: ease-in-out;
+  }
+  100% { transform: translateY(var(--y)) rotate(var(--r)); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wfl[data-intro] .wfl-tile { animation: none; }
+}
+
+/* Wordfall card in the Mini Games deck (UnoGameFace in table/card-faces.tsx): a little
+   board that plays a round while the card is hovered or focused. "glacier" finishes
+   typing, pops for +90, and the other words fall. Sizes are in cqw of the card. */
+.wfc-board {
+  position: relative;
+  width: 84%;
+  height: 34cqw;
+  overflow: hidden;
+  border-radius: 3cqw;
+  background: var(--color-felt-deep);
+  border: 0.4cqw solid rgb(31 27 22 / 0.7);
+  box-shadow:
+    inset 0 1cqw 5cqw rgb(0 0 0 / 0.5),
+    0 1cqw 2.4cqw rgb(0 0 0 / 0.35);
+}
+.wfc-limit {
+  position: absolute;
+  inset-inline: 0;
+  top: 68%;
+  border-top: 0.35cqw dashed rgb(179 38 30 / 0.7);
+}
+.wfc-word {
+  position: absolute;
+  padding: 1.2cqw 1.7cqw;
+  border-radius: 1cqw;
+  background: var(--color-ivory);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: 4.3cqw;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 0.5cqw 1.2cqw rgb(0 0 0 / 0.45);
+}
+.wfc-typing {
+  outline: 0.5cqw solid var(--color-highlight);
+  outline-offset: 0.3cqw;
+}
+.wfc-ice {
+  background: #2563eb;
+  color: var(--color-ivory);
+}
+.wfc-ghost {
+  background: rgb(245 239 225 / 0.13);
+  color: rgb(245 239 225 / 0.35);
+  text-decoration: line-through;
+  box-shadow: none;
+}
+.wfc-pts {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 4.3cqw;
+  font-weight: 600;
+  color: var(--color-highlight);
+  text-shadow: 0 0.3cqw 0.6cqw rgb(0 0 0 / 0.6);
+  opacity: 0;
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .wfc:hover .wfc-letter { animation: wfc-type 2.4s infinite both; }
+  .wfc:hover .wfc-typing { animation: wfc-pop 2.4s infinite both; }
+  .wfc:hover .wfc-pts { animation: wfc-float 2.4s infinite both; }
+  .wfc:hover .wfc-fall { animation: wfc-fall 2.4s infinite linear both; }
+}
+.wfc:focus-visible .wfc-letter { animation: wfc-type 2.4s infinite both; }
+.wfc:focus-visible .wfc-typing { animation: wfc-pop 2.4s infinite both; }
+.wfc:focus-visible .wfc-pts { animation: wfc-float 2.4s infinite both; }
+.wfc:focus-visible .wfc-fall { animation: wfc-fall 2.4s infinite linear both; }
+.wfc .wfc-fall.wfc-f2 { animation-delay: -0.8s; } /* after the rules above, so it wins */
+@media (prefers-reduced-motion: reduce) {
+  .wfc .wfc-letter,
+  .wfc .wfc-typing,
+  .wfc .wfc-pts,
+  .wfc .wfc-fall {
+    animation: none;
+  }
+}
+@keyframes wfc-type {
+  0%, 8% { color: var(--color-ink); }
+  9%, 92% { color: var(--color-suit-red); }
+  100% { color: var(--color-ink); }
+}
+@keyframes wfc-pop {
+  0%, 30% { transform: scale(1); opacity: 1; animation-timing-function: ease-out; }
+  36% { transform: scale(1.18) rotate(-4deg); opacity: 1; }
+  47% { transform: scale(0.6) rotate(8deg) translateY(-2cqw); opacity: 0; }
+  92% { transform: translateY(-5cqw); opacity: 0; animation-timing-function: ease-out; }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes wfc-float {
+  0%, 31% { transform: translateY(0); opacity: 0; }
+  36% { opacity: 1; }
+  68% { transform: translateY(-7cqw); opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes wfc-fall {
+  0% { transform: translateY(-3cqw); opacity: 0; }
+  12% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(9cqw); opacity: 0; }
+}
