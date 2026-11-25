@@ -44,9 +44,19 @@ export type Event =
 export type Status = "playing" | "levelUp" | "over";
 
 export const CARD_H = 34;
-// The limit line: the pile may stack up to 30% of the board height. Missed cards spread
-// across the width, so this takes roughly 15 misses on a desktop board, 10 on a phone.
+// On a desktop the board is always this size, so the window can't change the game.
+// Phones use whatever room is left above the keyboard (see resize()).
+export const BOARD_W = 560;
+export const BOARD_H = 520;
+// Shorter than this (a phone on its side) there's no room to play: the game pauses.
+export const MIN_BOARD_H = 120;
+// The limit line: on a desktop board the pile may stack up to 30% of the height. Missed
+// cards spread across the width, so this takes roughly 15 misses on a desktop, 10 on a phone.
 export const MAX_PILE = 0.3;
+// The limit is really a number of card rows. On a shorter board the pile is drawn flatter,
+// so the same misses fill the same share of it whatever the board's height.
+const PILE_ROWS = (BOARD_H * MAX_PILE) / CARD_H;
+const MIN_PILE_SCALE = 0.4;
 export const RACK_SIZE = 4;
 const FREEZE_TIME = 4;
 const SLOW_TIME = 7;
@@ -73,9 +83,11 @@ export function rankFor(score: number) {
 }
 
 export class Engine {
-  w = 360;
-  h = 560;
+  w = BOARD_W;
+  h = BOARD_H;
   charW = 9.6;
+  /** Height of a card on the pile: full size on a desktop board, flatter on short ones. */
+  pileH = CARD_H;
 
   status: Status = "playing";
   time = 0; // seconds since the start, used for animations
@@ -106,14 +118,40 @@ export class Engine {
   private spawned = 0;
   private dangerIn = 0;
 
+  /**
+   * Fits the game to a board of w × h. Desktop boards never change size; on a phone the
+   * board shrinks and grows as the keyboard opens and closes, so everything is rescaled
+   * to keep the game the same: the pile stays as full, and a falling card stays as far
+   * (and as many seconds) from the limit line.
+   */
   resize(w: number, h: number) {
-    // The pile sits on the floor: move it with the floor if the board's height changes.
-    const dy = h - this.h;
-    if (dy) for (const c of this.pileCards) c.y += dy;
-    for (const c of this.pileCards) c.x = Math.min(c.x, Math.max(0, w - c.w));
+    if (w === this.w && h === this.h) return;
+    const oldH = this.h;
+    const oldRoom = this.h - this.limit;
+    const oldPileH = this.pileH;
     this.w = w;
     this.h = h;
+    this.pileH = CARD_H * Math.min(1, Math.max(MIN_PILE_SCALE, h / BOARD_H));
     this.charW = w < 360 ? 9 : 9.6; // Geist Mono at 15px / 16px
+
+    // The pile sits on the floor: rescale its height above the floor with its cards.
+    const k = this.pileH / oldPileH;
+    for (const c of this.pileCards) {
+      c.y = h - (oldH - c.y) * k;
+      c.x = Math.min(c.x, Math.max(0, w - c.w));
+    }
+    const s = (h - this.limit) / oldRoom;
+    for (const word of this.words) {
+      word.y *= s;
+      word.speed *= s;
+      word.x = Math.min(word.x, Math.max(0, w - word.w));
+    }
+    this.version++;
+  }
+
+  /** How high the pile may stack, in px from the floor. */
+  get limit() {
+    return Math.min(this.h * 0.5, PILE_ROWS * this.pileH);
   }
 
   /** Top edge of the highest card on the pile (the floor if there are none). */
@@ -125,7 +163,7 @@ export class Engine {
   }
   /** How full the pile is, 0–100, where 100 means it has reached the limit line. */
   get pile() {
-    return Math.min(100, (this.pileHeight / (this.h * MAX_PILE)) * 100);
+    return Math.min(100, (this.pileHeight / this.limit) * 100);
   }
   /** Where a card spanning x..x+w would come to rest: on the floor or on the pile. */
   private floorUnder(x: number, w: number) {
@@ -150,8 +188,11 @@ export class Engine {
     return base * (0.75 + Math.random() * 0.5);
   }
   private fallSpeed() {
-    const fallTime = Math.max(3.2, 12 - 0.9 * (this.level - 1)); // seconds for the full board
-    return (this.h / fallTime) * (1 + 0.15 * this.progress) * (0.8 + Math.random() * 0.45);
+    // Seconds to fall the full board, when the limit line sits at MAX_PILE. What stays
+    // the same on every board is the time to reach the limit line.
+    const fallTime = Math.max(3.2, 12 - 0.9 * (this.level - 1));
+    const room = this.h - this.limit;
+    return (room / (fallTime * (1 - MAX_PILE))) * (1 + 0.15 * this.progress) * (0.8 + Math.random() * 0.45);
   }
 
   private spawn() {
@@ -275,7 +316,7 @@ export class Engine {
       text: word.text,
       kind: word.kind,
       x: word.x,
-      y: floor - CARD_H,
+      y: floor - this.pileH,
       w: word.w,
       tilt: (Math.random() - 0.5) * 6,
     });
