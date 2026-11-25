@@ -140,9 +140,11 @@ export class Engine {
       c.y = h - (oldH - c.y) * k;
       c.x = Math.min(c.x, Math.max(0, w - c.w));
     }
+    // Falling cards keep their size, so it's their bottom edge (the one that lands) that
+    // keeps its place: the same share of the way to the limit line.
     const s = (h - this.limit) / oldRoom;
     for (const word of this.words) {
-      word.y *= s;
+      word.y = (word.y + CARD_H) * s - CARD_H;
       word.speed *= s;
       word.x = Math.min(word.x, Math.max(0, w - word.w));
     }
