@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
+import { WordfallLogo } from "../games/wordfall/logo";
 import type { DeckStyle } from "./deck-styles";
 import type { CardData } from "./types";
 
@@ -80,11 +81,12 @@ function UnoBack({ label }: { label: string }) {
   );
 }
 
-function UnoFace({ card, index }: { card: CardData; index: number }) {
+function UnoFace({ card, index, revealDelay }: { card: CardData; index: number; revealDelay: number }) {
   const color = UNO_FACE_COLORS[index % UNO_FACE_COLORS.length];
   const n = String(index + 1);
   const corner = "absolute font-sans font-black italic leading-none";
-  if (card.kind === "game") return <UnoGameFace card={card} color={color} n={n} corner={corner} />;
+  if (card.kind === "game")
+    return <UnoGameFace card={card} color={color} n={n} corner={corner} revealDelay={revealDelay} />;
   return (
     <UnoShell color={color} oval="#fff" flipped>
       <span className={`${corner} left-[7%] top-[5%]`} style={unoType("15cqw", "#fff")} aria-hidden>
@@ -107,51 +109,76 @@ function UnoFace({ card, index }: { card: CardData; index: number }) {
   );
 }
 
-// A playable game: its name on the oval, and the whole card is the link to it.
+// A playable game. The whole card is the link: the game's logo on a white "wild card"
+// plate, and a little board below it that plays a round on hover or keyboard focus
+// (board styles and animations: .wfc in globals.css). Only Wordfall exists so far, so
+// the plate and board are Wordfall's.
 function UnoGameFace({
   card,
   color,
   n,
   corner,
+  revealDelay,
 }: {
   card: Extract<CardData, { kind: "game" }>;
   color: string;
   n: string;
   corner: string;
+  revealDelay: number;
 }) {
   return (
-    <UnoShell color={color} oval="#fff" flipped>
-      <span className={`${corner} left-[7%] top-[5%]`} style={unoType("15cqw", "#fff")} aria-hidden>
-        {n}
-      </span>
-      <span className={`${corner} bottom-[5%] right-[7%] rotate-180`} style={unoType("15cqw", "#fff")} aria-hidden>
-        {n}
-      </span>
-      {/* The whole card is the link. */}
-      <Link
-        href={card.href}
-        aria-label={`Play ${card.title}: ${card.blurb}`}
-        className="group/game absolute inset-0 flex flex-col items-center justify-center rounded-[7px] px-[14%] text-center focus-visible:outline-3 focus-visible:-outline-offset-3 focus-visible:outline-highlight"
-      >
-        <span
-          className="-rotate-[8deg] font-sans font-black italic leading-[0.9] tracking-[-0.02em]"
-          style={unoType("15cqw", color)}
-          aria-hidden
-        >
-          {card.title}
+    <Link
+      href={card.href}
+      aria-label={`Play ${card.title}: ${card.blurb}`}
+      // Hover and focus: lift 4px with the decks' yellow outline and glow. Tailwind's
+      // hover: only applies on devices that can hover, so phones skip it.
+      className={`${face} wfc group/game rotate-y-180 @container block bg-white p-[5%] shadow-[0_2px_6px_rgba(0,0,0,.35)] outline-2 outline-offset-3 outline-transparent transition-[translate,outline-color,box-shadow] duration-200 hover:shadow-[0_2px_6px_rgba(0,0,0,.35),0_0_22px_rgba(250,204,21,.35)] hover:outline-highlight focus-visible:shadow-[0_2px_6px_rgba(0,0,0,.35),0_0_22px_rgba(250,204,21,.35)] focus-visible:outline-highlight motion-safe:hover:-translate-y-1 motion-safe:focus-visible:-translate-y-1`}
+    >
+      <div className="relative h-full w-full overflow-hidden rounded-[7px]" style={{ background: color }}>
+        <div className="absolute left-1/2 top-1/2 h-[88%] w-[66%] -translate-x-1/2 -translate-y-1/2 rotate-[28deg] rounded-[50%] bg-white" />
+        <span className={`${corner} left-[7%] top-[5%]`} style={unoType("15cqw", "#fff")} aria-hidden>
+          {n}
         </span>
-        <span className="mt-[5cqw] leading-snug text-ink/70" style={{ fontSize: "5.6cqw" }} aria-hidden>
-          {card.blurb}
+        <span className={`${corner} bottom-[5%] right-[7%] rotate-180`} style={unoType("15cqw", "#fff")} aria-hidden>
+          {n}
         </span>
-        <span
-          className="mt-[5cqw] rounded-full bg-ink px-[5cqw] py-[1.6cqw] font-mono uppercase tracking-[0.18em] text-white transition-transform group-hover/game:scale-105 group-focus-visible/game:scale-105"
-          style={{ fontSize: "5cqw" }}
-          aria-hidden
-        >
-          Play ▸
-        </span>
-      </Link>
-    </UnoShell>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-[6cqw] px-[9%]" aria-hidden>
+          <div className="flex -rotate-5 flex-col items-center rounded-[3cqw] bg-white px-[4.5cqw] pb-[3.4cqw] pt-[4cqw] text-center shadow-[0_1.2cqw_3cqw_rgba(0,0,0,.4)] transition-transform duration-300 ease-[cubic-bezier(.3,.7,.2,1)] group-hover/game:-translate-y-[1cqw] group-hover/game:-rotate-2 group-focus-visible/game:-translate-y-[1cqw] group-focus-visible/game:-rotate-2 motion-reduce:transition-none">
+            {/* The tiles drop in once the card has turned face up. */}
+            <WordfallLogo size="10.6cqw" on="light" intro delay={revealDelay} className="rotate-[-3deg]" />
+            <p className="font-sans leading-[1.35] text-ink/72" style={{ fontSize: "5cqw" }}>
+              {card.blurb}
+            </p>
+          </div>
+          <div className="wfc-board">
+            <span className="wfc-word wfc-fall" style={{ left: "7%", top: "9%" }}>
+              lantern
+            </span>
+            <span className="wfc-word wfc-ice wfc-fall wfc-f2" style={{ left: "52%", top: "20%" }}>
+              ♦ pebble
+            </span>
+            <span className="wfc-word wfc-typing" style={{ left: "18%", top: "42%" }}>
+              <span className="text-suit-red">gla</span>
+              {["c", "i", "e", "r"].map((ch, i) => (
+                <span key={i} className="wfc-letter" style={{ animationDelay: `${i * 0.12}s` }}>
+                  {ch}
+                </span>
+              ))}
+            </span>
+            <span className="wfc-pts" style={{ left: "34%", top: "30%" }}>
+              +90
+            </span>
+            <div className="wfc-limit" />
+            <span className="wfc-word wfc-ghost" style={{ left: "5%", bottom: "6%" }}>
+              orbit
+            </span>
+            <span className="wfc-word wfc-ghost" style={{ left: "48%", bottom: "6%" }}>
+              commit
+            </span>
+          </div>
+        </div>
+      </div>
+    </Link>
   );
 }
 
@@ -292,13 +319,16 @@ export function CardFace({
   style,
   rank,
   index,
+  revealDelay = 0,
 }: {
   card: CardData;
   style: DeckStyle;
   rank: string;
   index: number;
+  /** Seconds until this card has turned face up, for intro animations on the face. */
+  revealDelay?: number;
 }) {
-  if (style.variant === "uno") return <UnoFace card={card} index={index} />;
+  if (style.variant === "uno") return <UnoFace card={card} index={index} revealDelay={revealDelay} />;
   const base = `${face} rotate-y-180 overflow-hidden bg-ivory text-ink shadow-[0_2px_8px_rgba(0,0,0,.35)]`;
 
   if (card.kind === "contact") return <BusinessCard card={card} />;

@@ -396,7 +396,7 @@ export function CardTable({
                     transition={{ delay: delay + LANDING, duration: FLIP, ease: [0.3, 0.7, 0.2, 1] }}
                   >
                     <CardBack style={style} label={`${open.label} card`} />
-                    <CardFace card={card} style={style} rank={rank(i)} index={i} />
+                    <CardFace card={card} style={style} rank={rank(i)} index={i} revealDelay={delay + LANDING + FLIP} />
                   </motion.div>
                 </motion.div>
               );

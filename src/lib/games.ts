@@ -9,6 +9,6 @@ export const GAMES: Game[] = [
   {
     slug: "wordfall",
     title: "Wordfall",
-    blurb: "Type the falling words before the stacks reach the top.",
+    blurb: "Type the falling words before the pile reaches the line.",
   },
 ];
