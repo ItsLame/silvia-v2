@@ -87,7 +87,7 @@ export class Engine {
   bestStreak = 0;
   correct = 0;
   wrong = 0;
-  chars = 0; // letters in correctly typed words
+  chars = 0; // keystrokes in correctly typed words: the letters plus the Space/Enter that sends each
   activeTime = 0; // seconds with at least one noticeable card on the board (see NOTICE_TIME)
   freezeLeft = 0;
   slowLeft = 0;
@@ -342,7 +342,7 @@ export class Engine {
     this.streak++;
     this.bestStreak = Math.max(this.bestStreak, this.streak);
     this.correct++;
-    this.chars += word.text.length;
+    this.chars += word.text.length + 1; // + the Space/Enter, as typing tests count it
     this.cleared++;
     const points = this.pointsFor(word);
     this.clearWord(word, points);
@@ -416,7 +416,8 @@ export class Engine {
    * Typing speed in words (5 letters) per minute, over the time there was something to
    * type: reading, choosing, typing and fixing mistakes all count; an empty board, a
    * card that has only just appeared, level breaks and pauses don't. Only correctly
-   * typed words count towards the letters.
+   * typed words count, each as its letters plus the Space/Enter that sent it (the
+   * space typing tests count between words).
    */
   wpm() {
     return this.activeTime > 3 ? Math.round(this.chars / 5 / (this.activeTime / 60)) : 0;
