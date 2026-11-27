@@ -2,19 +2,16 @@
 
 import Link from "next/link";
 import { type PointerEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { COIN_LIFE, Engine, GRUNT, HALL, KING, PAD_R, PATH, TOWER, WALL_R, WORLD } from "./engine";
+import { Engine, HALL, KING } from "./engine";
+import { type Notice, STICK_R, type Stick, drawOverlay } from "./overlay";
+import type { Renderer3 } from "./render-3d";
 
-type Phase = "title" | "playing" | "paused" | "over";
+// "unsupported": the board is drawn with WebGL, and this browser has none to give.
+type Phase = "title" | "playing" | "paused" | "over" | "unsupported";
 type Hud = { coins: number; wave: number; nextIn: number; hallHp: number; kingHp: number; down: boolean };
 type Result = { seconds: number; wave: number; kills: number };
-/** A drag on the board: where it started and where the finger is now, in board pixels. */
-type Stick = { id: number; ox: number; oy: number; x: number; y: number };
-type Notice = { text: string; at: number };
 
-const STICK_R = 44;
-const NOTICE_MS = 1800;
 const IVORY = "245,239,225";
-const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
 const hudOf = (e: Engine): Hud => ({
   coins: e.king.coins,
@@ -39,7 +36,8 @@ const KEYS: Record<string, [number, number]> = {
 
 export function Holdfast() {
   const boardRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const worldRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const phaseRef = useRef<Phase>("title");
   const keysRef = useRef(new Set<string>());
@@ -78,6 +76,7 @@ export function Holdfast() {
     const onKeyDown = (ev: KeyboardEvent) => {
       if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
       const p = phaseRef.current;
+      if (p === "unsupported") return;
       if (ev.key === "Enter" && p !== "playing") {
         ev.preventDefault();
         if (p === "paused") resume();
@@ -114,21 +113,34 @@ export function Holdfast() {
   // The game loop: step the rules, draw the board, refresh the HUD when it changes.
   useEffect(() => {
     const board = boardRef.current!;
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
+    const world = worldRef.current!;
+    const overlay = overlayRef.current!;
+    const octx = overlay.getContext("2d")!;
+    let renderer: Renderer3 | null = null;
+    let stopped = false;
     let w = 0;
     let h = 0;
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
       w = board.clientWidth;
       h = board.clientHeight;
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      overlay.width = Math.round(w * dpr);
+      overlay.height = Math.round(h * dpr);
+      octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      renderer?.resize(w, h, dpr);
     };
     const ro = new ResizeObserver(resize);
     ro.observe(board);
     resize();
+    // The renderer brings three.js with it, so it loads after the page itself.
+    import("./render-3d")
+      .then((m) => {
+        if (stopped) return;
+        renderer = new m.Renderer3(world);
+        resize();
+      })
+      // Say so, instead of starting a game nobody can see.
+      .catch(() => !stopped && setPhase("unsupported"));
     engineRef.current ??= new Engine();
 
     let raf = 0;
@@ -163,7 +175,11 @@ export function Holdfast() {
           }
         }
       }
-      draw(ctx, e, w, h, now, phaseRef.current === "playing" ? stickRef.current : null, noticeRef.current);
+      if (renderer) {
+        renderer.draw(e, now);
+        const stick = phaseRef.current === "playing" ? stickRef.current : null;
+        drawOverlay(octx, e, w, h, now, renderer.project, stick, noticeRef.current);
+      }
 
       const next = hudOf(e);
       const key = Object.values(next).join("|");
@@ -174,8 +190,10 @@ export function Holdfast() {
     };
     raf = requestAnimationFrame(frame);
     return () => {
+      stopped = true;
       cancelAnimationFrame(raf);
       ro.disconnect();
+      renderer?.dispose();
       // Leaving the page (Next keeps it around hidden): pause the game.
       if (phaseRef.current === "playing") setPhase("paused");
     };
@@ -248,8 +266,18 @@ export function Holdfast() {
           hallLow ? "border-red-500/60" : "border-ivory/10"
         }`}
       >
-        <canvas ref={canvasRef} className="absolute inset-0 size-full" aria-label="Holdfast game board" />
+        {/* The world in WebGL, with labels and controls drawn over it. */}
+        <canvas ref={worldRef} className="absolute inset-0 size-full" aria-label="Holdfast game board" />
+        <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 size-full" aria-hidden />
 
+        {phase === "unsupported" && (
+          <Overlay>
+            <p className="font-display text-5xl">Holdfast</p>
+            <p className="mt-3 max-w-xs text-sm text-ivory/75">
+              This game is drawn in 3D and needs WebGL, which this browser has switched off or doesn&apos;t support.
+            </p>
+          </Overlay>
+        )}
         {phase === "title" && (
           <Overlay>
             <p className="font-display text-6xl">Holdfast</p>
@@ -332,240 +360,4 @@ function TextButton({ onClick, children }: { onClick: () => void; children: Reac
       {children}
     </button>
   );
-}
-
-/** Paint one frame. Everything is plain shapes: this is the grey-box. */
-function draw(
-  ctx: CanvasRenderingContext2D,
-  e: Engine,
-  w: number,
-  h: number,
-  now: number,
-  stick: Stick | null,
-  notice: Notice | null,
-) {
-  const k = e.king;
-  // The camera follows the king and stops at the edges of the world.
-  const camX = w >= WORLD.w ? (WORLD.w - w) / 2 : Math.min(WORLD.w - w, Math.max(0, k.x - w / 2));
-  const camY = h >= WORLD.h ? (WORLD.h - h) / 2 : Math.min(WORLD.h - h, Math.max(0, k.y - h / 2));
-  const circle = (x: number, y: number, r: number) => {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-  };
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.save();
-  ctx.translate(-camX, -camY);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  // Ground and the enemies' path.
-  ctx.fillStyle = "rgba(21,64,47,.6)";
-  ctx.fillRect(0, 0, WORLD.w, WORLD.h);
-  ctx.strokeStyle = `rgba(${IVORY},.12)`;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, WORLD.w - 2, WORLD.h - 2);
-  ctx.strokeStyle = "rgba(214,196,160,.2)";
-  ctx.lineWidth = 46;
-  ctx.beginPath();
-  PATH.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-  ctx.stroke();
-
-  // The fence ring, open at the gate to the south.
-  ctx.strokeStyle = `rgba(${IVORY},.35)`;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([10, 8]);
-  ctx.beginPath();
-  ctx.arc(HALL.x, HALL.y, WALL_R, Math.PI / 2 + 0.24, Math.PI / 2 - 0.24 + Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Build pads: what is still owed, filling from the bottom as coins go in.
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (const p of e.pads) {
-    if (!p.open || p.built) continue;
-    const size = PAD_R * 2;
-    const filled = (p.paid / p.cost) * size;
-    ctx.fillStyle = "rgba(250,204,21,.28)";
-    ctx.fillRect(p.x - PAD_R, p.y + PAD_R - filled, size, filled);
-    ctx.strokeStyle = `rgba(${IVORY},.85)`;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([7, 6]);
-    ctx.strokeRect(p.x - PAD_R, p.y - PAD_R, size, size);
-    ctx.setLineDash([]);
-    // The king would cover the number while he pays, so it moves above the pad.
-    const paying = e.activePad === p;
-    ctx.fillStyle = `rgb(${IVORY})`;
-    ctx.font = `600 18px ${MONO}`;
-    ctx.fillText(String(p.cost - p.paid), p.x, paying ? p.y - PAD_R - 14 : p.y - 4);
-    if (paying) continue;
-    ctx.fillStyle = `rgba(${IVORY},.6)`;
-    ctx.font = `9px ${MONO}`;
-    ctx.fillText(p.label.toUpperCase(), p.x, p.y + 14);
-  }
-
-  // Coins on the ground; they blink through their last three seconds.
-  for (const c of e.coins) {
-    const left = COIN_LIFE - (e.time - c.bornAt);
-    if (left < 3 && Math.floor(left * 6) % 2 === 0) continue;
-    circle(c.x, c.y, 4.5);
-    ctx.fillStyle = "#facc15";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(120,80,0,.8)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-
-  // The hall, with its health above it.
-  const struck = e.hallUnderAttack && Math.floor(now / 120) % 2 === 0;
-  ctx.fillStyle = struck ? "#ef4444" : `rgba(${IVORY},.85)`;
-  ctx.fillRect(HALL.x - HALL.r, HALL.y - HALL.r, HALL.r * 2, HALL.r * 2);
-  ctx.fillStyle = "rgba(10,34,25,.9)";
-  ctx.font = `600 11px ${MONO}`;
-  ctx.fillText("HALL", HALL.x, HALL.y);
-  ctx.fillStyle = "rgba(0,0,0,.45)";
-  ctx.fillRect(HALL.x - 32, HALL.y - HALL.r - 12, 64, 5);
-  ctx.fillStyle = e.hallHp <= HALL.maxHp / 4 ? "#ef4444" : "#86efac";
-  ctx.fillRect(HALL.x - 32, HALL.y - HALL.r - 12, 64 * (e.hallHp / HALL.maxHp), 5);
-
-  for (const t of e.towers) {
-    circle(t.x, t.y, TOWER.range);
-    ctx.strokeStyle = "rgba(147,197,253,.12)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    circle(t.x, t.y, TOWER.r);
-    ctx.fillStyle = "#93c5fd";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(10,34,25,.9)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-
-  for (const en of e.enemies) {
-    circle(en.x, en.y, GRUNT.r);
-    ctx.fillStyle = en.hp < GRUNT.hp ? "#b91c1c" : "#ef4444";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,.4)";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  ctx.strokeStyle = "rgba(250,204,21,.9)";
-  ctx.lineWidth = 2;
-  for (const s of e.shots) {
-    ctx.beginPath();
-    ctx.moveTo(s.x1, s.y1);
-    ctx.lineTo(s.x2, s.y2);
-    ctx.stroke();
-  }
-
-  if (e.kingDown) {
-    // Where he fell, and how long until he is back at the hall.
-    ctx.strokeStyle = `rgba(${IVORY},.5)`;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(k.x - 8, k.y - 8);
-    ctx.lineTo(k.x + 8, k.y + 8);
-    ctx.moveTo(k.x + 8, k.y - 8);
-    ctx.lineTo(k.x - 8, k.y + 8);
-    ctx.stroke();
-    ctx.fillStyle = `rgb(${IVORY})`;
-    ctx.font = `600 14px ${MONO}`;
-    ctx.fillText(String(Math.ceil(k.downFor)), k.x, k.y - 22);
-  } else {
-    // Guide trail: chevrons marching from the king towards the next useful thing.
-    const g = e.guide;
-    if (g) {
-      const d = Math.hypot(g.x - k.x, g.y - k.y);
-      const count = Math.min(6, Math.floor((d - 34) / 20));
-      const angle = Math.atan2(g.y - k.y, g.x - k.x);
-      const march = ((now / 500) % 1) * 20;
-      ctx.fillStyle = "rgba(56,189,248,.9)";
-      for (let i = 0; i < count; i++) {
-        const at = 24 + i * 20 + march;
-        ctx.save();
-        ctx.translate(k.x + Math.cos(angle) * at, k.y + Math.sin(angle) * at);
-        ctx.rotate(angle);
-        ctx.beginPath();
-        ctx.moveTo(-4, -6);
-        ctx.lineTo(6, 0);
-        ctx.lineTo(-4, 6);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
-    }
-    circle(k.x, k.y, KING.range);
-    ctx.strokeStyle = `rgba(${IVORY},.08)`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    circle(k.x, k.y, KING.r);
-    ctx.fillStyle = `rgb(${IVORY})`;
-    ctx.fill();
-    ctx.strokeStyle = "#38bdf8";
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-    // Carried coins stack on his back.
-    const shown = Math.min(k.coins, 16);
-    for (let i = 0; i < shown; i++) {
-      ctx.beginPath();
-      ctx.ellipse(k.x + 9, k.y - 10 - i * 3, 6, 2.6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = "#facc15";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(120,80,0,.8)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-
-  // From here on, board pixels: markers and controls that sit over the world.
-  const hallX = HALL.x - camX;
-  const hallY = HALL.y - camY;
-  if (e.hallUnderAttack && (hallX < 0 || hallX > w || hallY < 0 || hallY > h)) {
-    // The hall is being hit off-screen: point back to it from the edge.
-    const x = Math.min(w - 22, Math.max(22, hallX));
-    const y = Math.min(h - 22, Math.max(22, hallY));
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(Math.atan2(hallY - y, hallX - x));
-    ctx.globalAlpha = 0.55 + 0.45 * Math.sin(now / 90);
-    ctx.fillStyle = "#ef4444";
-    ctx.beginPath();
-    ctx.moveTo(12, 0);
-    ctx.lineTo(-8, -10);
-    ctx.lineTo(-8, 10);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-  if (notice && now - notice.at < NOTICE_MS) {
-    ctx.globalAlpha = Math.min(1, (NOTICE_MS - (now - notice.at)) / 400);
-    ctx.font = `600 13px ${MONO}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const width = ctx.measureText(notice.text).width + 24;
-    ctx.fillStyle = "rgba(10,34,25,.8)";
-    ctx.beginPath();
-    ctx.roundRect(w / 2 - width / 2, 14, width, 26, 13);
-    ctx.fill();
-    ctx.fillStyle = "#facc15";
-    ctx.fillText(notice.text, w / 2, 27.5);
-    ctx.globalAlpha = 1;
-  }
-  if (stick) {
-    const dx = stick.x - stick.ox;
-    const dy = stick.y - stick.oy;
-    const len = Math.max(1, Math.hypot(dx, dy) / STICK_R);
-    circle(stick.ox, stick.oy, STICK_R);
-    ctx.fillStyle = `rgba(${IVORY},.1)`;
-    ctx.fill();
-    ctx.strokeStyle = `rgba(${IVORY},.35)`;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    circle(stick.ox + dx / len, stick.oy + dy / len, 18);
-    ctx.fillStyle = `rgba(${IVORY},.7)`;
-    ctx.fill();
-  }
 }
