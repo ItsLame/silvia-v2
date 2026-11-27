@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   type ChangeEvent,
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
   useCallback,
@@ -17,11 +18,13 @@ import { Leaderboard, type Standing, scores } from "../leaderboard";
 import { Help } from "./help";
 import { WordfallLogo } from "./logo";
 import {
+  BOARD_H,
+  BOARD_W,
   CARD_H,
   Engine,
   type Event,
   type Kind,
-  MAX_PILE,
+  MIN_BOARD_H,
   type PileCard,
   type Popup,
   RACK_SIZE,
@@ -31,6 +34,10 @@ import {
 } from "./engine";
 
 type Phase = "title" | "playing" | "paused" | "over";
+// Whether the board fits the window. A desktop board has a fixed size and needs room for
+// all of it; a phone's board fits whatever room there is, unless that's next to nothing.
+type Room = { ok: true } | { ok: false; reason: "short" | "narrow"; by: number; phone: boolean };
+const isPhone = () => window.matchMedia("(pointer: coarse)").matches;
 
 // What React renders. Positions of falling words are written straight to the DOM each
 // frame; this only changes when words appear or go, or the HUD changes.
@@ -42,6 +49,8 @@ type Snap = {
   quota: number;
   pile: number;
   pileHeight: number;
+  pileH: number;
+  limitTop: number;
   streak: number;
   frozen: boolean;
   slowed: boolean;
@@ -60,6 +69,8 @@ const snapshot = (e: Engine): Snap => ({
   quota: e.quota,
   pile: e.pile,
   pileHeight: e.pileHeight,
+  pileH: e.pileH,
+  limitTop: e.h - e.limit,
   streak: e.streak,
   frozen: e.freezeLeft > 0,
   slowed: e.slowLeft > 0,
@@ -113,7 +124,10 @@ function useMuted(channel: Channel) {
 }
 
 export function Wordfall() {
+  const frameRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const [room, setRoomState] = useState<Room>({ ok: true });
+  const roomOk = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const wordEls = useRef(new Map<number, HTMLDivElement>());
   const engineRef = useRef<Engine | null>(null);
@@ -263,7 +277,7 @@ export function Wordfall() {
     a.unlock();
     const e = new Engine();
     const board = boardRef.current;
-    if (board) e.resize(board.clientWidth, board.clientHeight);
+    if (board && roomOk.current) e.resize(board.clientWidth, board.clientHeight);
     engineRef.current = e;
     wordEls.current.clear();
     shakeRef.current?.getAnimations().forEach((an) => an.cancel());
@@ -289,7 +303,7 @@ export function Wordfall() {
   }, [setPhase]);
 
   const resume = useCallback(() => {
-    if (phaseRef.current !== "paused") return;
+    if (phaseRef.current !== "paused" || !roomOk.current) return;
     const a = audio();
     a.unlock();
     a.startMusic();
@@ -346,6 +360,7 @@ export function Wordfall() {
       const p = phaseRef.current;
       const inInput = ev.target === inputRef.current;
       const onButton = ev.target instanceof HTMLElement && ev.target.closest("button, a");
+      if (!roomOk.current) return; // the "make room" notice is up
       if (p === "title" || p === "over") {
         if (ev.key === "Enter" && !onButton) {
           ev.preventDefault();
@@ -392,8 +407,33 @@ export function Wordfall() {
 
   // The game loop.
   useEffect(() => {
+    const frameEl = frameRef.current!;
     const board = boardRef.current!;
-    const ro = new ResizeObserver(() => engineRef.current?.resize(board.clientWidth, board.clientHeight));
+    const measure = () => {
+      const phone = isPhone();
+      let next: Room = { ok: true };
+      if (phone) {
+        if (board.clientHeight < MIN_BOARD_H) next = { ok: false, reason: "short", by: 0, phone };
+      } else if (frameEl.clientHeight < BOARD_H - 0.5) {
+        next = { ok: false, reason: "short", by: Math.ceil(BOARD_H - frameEl.clientHeight), phone };
+      } else if (frameEl.clientWidth < BOARD_W - 0.5) {
+        next = { ok: false, reason: "narrow", by: Math.ceil(BOARD_W - frameEl.clientWidth), phone };
+      }
+      roomOk.current = next.ok;
+      setRoomState((prev) =>
+        prev.ok === next.ok && (next.ok || (!prev.ok && prev.reason === next.reason && prev.by === next.by))
+          ? prev
+          : next,
+      );
+      if (!next.ok) {
+        pause();
+        return;
+      }
+      // Fixed on a desktop, so this only ever changes anything on a phone.
+      engineRef.current?.resize(board.clientWidth, board.clientHeight);
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(frameEl);
     ro.observe(board);
 
     let raf = 0;
@@ -424,7 +464,7 @@ export function Wordfall() {
       audioRef.current?.stopMusic();
       if (phaseRef.current === "playing") setPhase("paused");
     };
-  }, [handle, setPhase]);
+  }, [handle, setPhase, pause]);
 
   const onChange = (ev: ChangeEvent<HTMLInputElement>) => {
     if (phaseRef.current !== "playing") return;
@@ -448,7 +488,10 @@ export function Wordfall() {
   const matching = typed.length > 0;
 
   return (
-    <main className="flex h-dvh flex-col items-center overflow-hidden px-3 pt-3 sm:px-6 sm:pt-5">
+    <main
+      className="flex h-dvh flex-col items-center justify-center overflow-hidden px-3 pt-3 sm:px-6 sm:pt-5 pointer-coarse:justify-start"
+      style={{ "--board-w": `${BOARD_W}px`, "--board-h": `${BOARD_H}px` } as CSSProperties}
+    >
       <header className="flex w-full max-w-[560px] items-center justify-between gap-3">
         <Link
           href="/games"
@@ -514,151 +557,158 @@ export function Wordfall() {
         </span>
       </div>
 
-      {/* Board */}
+      {/* Board. On a desktop it's a fixed size inside a frame that shrinks with the window
+          (so we can tell when it no longer fits); on a phone it fills the frame. */}
       <div
-        ref={boardRef}
-        onPointerDown={() => phase === "playing" && setTimeout(() => inputRef.current?.focus())}
-        className={`relative mt-3 min-h-0 w-full max-w-[560px] flex-1 overflow-hidden rounded-2xl border bg-felt-deep/40 shadow-[inset_0_2px_30px_rgba(0,0,0,.45)] transition-colors sm:max-h-[720px] ${
-          danger ? "border-red-500/60" : "border-ivory/10"
-        }`}
+        ref={frameRef}
+        className="relative mt-3 min-h-0 w-full max-w-[560px] flex-1 overflow-hidden rounded-2xl max-h-(--board-h) pointer-coarse:max-h-[720px]"
       >
-        {/* Freeze / slow tints. */}
         <div
-          className={`pointer-events-none absolute inset-0 transition-opacity duration-300 ${s?.frozen ? "opacity-100" : "opacity-0"}`}
-          style={{ background: "linear-gradient(180deg, rgba(147,197,253,.18), rgba(147,197,253,.05))" }}
-        />
-        <div
-          className={`pointer-events-none absolute inset-0 transition-opacity duration-300 ${s?.slowed ? "opacity-100" : "opacity-0"}`}
-          style={{ background: "linear-gradient(180deg, rgba(134,239,172,.12), rgba(134,239,172,.03))" }}
-        />
-        {/* The highest the pile can reach. */}
-        <div
-          className="pointer-events-none absolute inset-x-0 border-t border-dashed border-suit-red/40"
-          style={{ top: `${(1 - MAX_PILE) * 100}%` }}
+          ref={boardRef}
+          onPointerDown={() => phase === "playing" && setTimeout(() => inputRef.current?.focus())}
+          className={`relative h-(--board-h) w-(--board-w) overflow-hidden rounded-2xl border bg-felt-deep/40 shadow-[inset_0_2px_30px_rgba(0,0,0,.45)] transition-colors pointer-coarse:h-full pointer-coarse:w-full ${
+            danger ? "border-red-500/60" : "border-ivory/10"
+          }`}
         >
-          <span className="absolute right-2 top-1 font-mono text-[10px] uppercase tracking-[0.18em] text-suit-red/60">
-            limit
-          </span>
-        </div>
-
-        {/* The pile: each missed card rests exactly where it landed. */}
-        {s?.pileCards.map((c) => (
+          {/* Freeze / slow tints. */}
           <div
-            key={c.id}
-            className="pointer-events-none absolute left-0 top-0"
-            style={{ transform: `translate(${c.x}px, ${c.y}px) rotate(${c.tilt}deg)` }}
+            className={`pointer-events-none absolute inset-0 transition-opacity duration-300 ${s?.frozen ? "opacity-100" : "opacity-0"}`}
+            style={{ background: "linear-gradient(180deg, rgba(147,197,253,.18), rgba(147,197,253,.05))" }}
+          />
+          <div
+            className={`pointer-events-none absolute inset-0 transition-opacity duration-300 ${s?.slowed ? "opacity-100" : "opacity-0"}`}
+            style={{ background: "linear-gradient(180deg, rgba(134,239,172,.12), rgba(134,239,172,.03))" }}
+          />
+          {/* The highest the pile can reach. */}
+          <div
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-suit-red/40"
+            style={{ top: s ? s.limitTop : `${(1 - 0.3) * 100}%` }}
           >
-            <WordCard text={c.text} kind={c.kind} typed="" dim />
+            <span className="absolute right-2 top-1 font-mono text-[10px] uppercase tracking-[0.18em] text-suit-red/60">
+              limit
+            </span>
           </div>
-        ))}
 
-        {/* Falling words. */}
-        {s?.words.map((w) => {
-          const hit = !w.cleared && matching && w.text.startsWith(typed);
-          return (
+          {/* The pile: each missed card rests exactly where it landed. */}
+          {s?.pileCards.map((c) => (
             <div
-              key={w.id}
-              ref={(el) => {
-                if (el) wordEls.current.set(w.id, el);
-                else wordEls.current.delete(w.id);
-              }}
-              className="absolute left-0 top-0 will-change-transform"
-              style={{ transform: `translate(${w.x}px, ${w.y}px)`, zIndex: hit ? 2 : 1 }}
+              key={c.id}
+              className="pointer-events-none absolute left-0 top-0"
+              style={{ transform: `translate(${c.x}px, ${c.y}px) rotate(${c.tilt}deg)` }}
             >
-              <div className={w.cleared ? "animate-wf-pop" : undefined}>
-                <WordCard text={w.text} kind={w.kind} typed={hit ? typed : ""} rushed={w.rushed} />
+              <WordCard text={c.text} kind={c.kind} typed="" dim height={s.pileH} width={c.w} />
+            </div>
+          ))}
+
+          {/* Falling words. */}
+          {s?.words.map((w) => {
+            const hit = !w.cleared && matching && w.text.startsWith(typed);
+            return (
+              <div
+                key={w.id}
+                ref={(el) => {
+                  if (el) wordEls.current.set(w.id, el);
+                  else wordEls.current.delete(w.id);
+                }}
+                className="absolute left-0 top-0 will-change-transform"
+                style={{ transform: `translate(${w.x}px, ${w.y}px)`, zIndex: hit ? 2 : 1 }}
+              >
+                <div className={w.cleared ? "animate-wf-pop" : undefined}>
+                  <WordCard text={w.text} kind={w.kind} typed={hit ? typed : ""} rushed={w.rushed} />
+                </div>
+              </div>
+            );
+          })}
+
+          {s?.popups.map((p) => (
+            <span
+              key={p.id}
+              className="pointer-events-none absolute animate-wf-float font-mono text-sm font-semibold text-highlight [text-shadow:0_1px_2px_rgba(0,0,0,.6)]"
+              style={{ left: p.x, top: p.y }}
+            >
+              {p.text}
+            </span>
+          ))}
+
+          {s?.status === "levelUp" && s.levelUp && (
+            <div key={s.levelUp.level} className="pointer-events-none absolute inset-0 grid place-items-center">
+              <div className="animate-wf-banner text-center">
+                <p className="font-display text-6xl">Level {s.levelUp.level}</p>
+                {s.levelUp.perfect && (
+                  <p className="mt-2 font-mono text-sm uppercase tracking-[0.2em] text-highlight">
+                    Clean hand · +{s.levelUp.bonus.toLocaleString()}
+                  </p>
+                )}
               </div>
             </div>
-          );
-        })}
+          )}
 
-        {s?.popups.map((p) => (
-          <span
-            key={p.id}
-            className="pointer-events-none absolute animate-wf-float font-mono text-sm font-semibold text-highlight [text-shadow:0_1px_2px_rgba(0,0,0,.6)]"
-            style={{ left: p.x, top: p.y }}
-          >
-            {p.text}
-          </span>
-        ))}
+          {phase === "title" && (
+            <Overlay>
+              <WordfallLogo size="44px" intro />
+              <p className="mt-3 max-w-xs text-sm text-ivory/75">
+                Type a falling word and press <Kbd>Space</Kbd> to clear it. Missed cards stack up at the bottom. If
+                the pile reaches the limit line, the game is over.
+              </p>
+              <p className="mt-3 max-w-xs text-sm text-ivory/75">
+                Clear a coloured card to put its spell on your rack. Type the spell&apos;s name to cast it.
+              </p>
+              <ul className="mt-5 grid grid-cols-2 gap-x-6 gap-y-2 text-left text-sm">
+                {Object.values(SPECIALS).map((p) => (
+                  <li key={p.label} className="flex items-center gap-2">
+                    <span className="grid size-6 place-items-center rounded text-ivory" style={{ background: p.color }}>
+                      {p.suit}
+                    </span>
+                    <span>
+                      <span className="font-mono font-medium lowercase">{p.label}</span>
+                      <span className="text-ivory/55"> {p.blurb}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <StartButton onClick={start}>Deal me in</StartButton>
+              <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-ivory/45 max-sm:hidden">
+                or press Enter · Esc pauses
+              </p>
+              <div className="mt-4 flex gap-5">
+                <TextButton onClick={openHelp}>How to play</TextButton>
+                <TextButton onClick={openLeaderboard}>Leaderboard</TextButton>
+              </div>
+            </Overlay>
+          )}
 
-        {s?.status === "levelUp" && s.levelUp && (
-          <div key={s.levelUp.level} className="pointer-events-none absolute inset-0 grid place-items-center">
-            <div className="animate-wf-banner text-center">
-              <p className="font-display text-6xl">Level {s.levelUp.level}</p>
-              {s.levelUp.perfect && (
-                <p className="mt-2 font-mono text-sm uppercase tracking-[0.2em] text-highlight">
-                  Clean hand · +{s.levelUp.bonus.toLocaleString()}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+          {phase === "paused" && (
+            <Overlay>
+              <p className="font-display text-5xl">Paused</p>
+              <StartButton onClick={resume}>Resume</StartButton>
+              <button
+                type="button"
+                onClick={start}
+                className="mt-4 cursor-pointer text-sm text-ivory/70 underline decoration-ivory/30 underline-offset-4 transition-colors hover:text-highlight hover:decoration-highlight"
+              >
+                Start over
+              </button>
+              <button
+                type="button"
+                onClick={openHelp}
+                className="mt-4 cursor-pointer text-sm text-ivory/70 underline decoration-ivory/30 underline-offset-4 transition-colors hover:text-highlight hover:decoration-highlight"
+              >
+                How to play
+              </button>
+            </Overlay>
+          )}
 
-        {phase === "title" && (
-          <Overlay>
-            <WordfallLogo size="44px" intro />
-            <p className="mt-3 max-w-xs text-sm text-ivory/75">
-              Type a falling word and press <Kbd>Space</Kbd> to clear it. Missed cards stack up at the bottom. If
-              the pile reaches the limit line, the game is over.
-            </p>
-            <p className="mt-3 max-w-xs text-sm text-ivory/75">
-              Clear a coloured card to put its spell on your rack. Type the spell&apos;s name to cast it.
-            </p>
-            <ul className="mt-5 grid grid-cols-2 gap-x-6 gap-y-2 text-left text-sm">
-              {Object.values(SPECIALS).map((p) => (
-                <li key={p.label} className="flex items-center gap-2">
-                  <span className="grid size-6 place-items-center rounded text-ivory" style={{ background: p.color }}>
-                    {p.suit}
-                  </span>
-                  <span>
-                    <span className="font-mono font-medium lowercase">{p.label}</span>
-                    <span className="text-ivory/55"> {p.blurb}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <StartButton onClick={start}>Deal me in</StartButton>
-            <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-ivory/45 max-sm:hidden">
-              or press Enter · Esc pauses
-            </p>
-            <div className="mt-4 flex gap-5">
-              <TextButton onClick={openHelp}>How to play</TextButton>
-              <TextButton onClick={openLeaderboard}>Leaderboard</TextButton>
-            </div>
-          </Overlay>
-        )}
-
-        {phase === "paused" && (
-          <Overlay>
-            <p className="font-display text-5xl">Paused</p>
-            <StartButton onClick={resume}>Resume</StartButton>
-            <button
-              type="button"
-              onClick={start}
-              className="mt-4 cursor-pointer text-sm text-ivory/70 underline decoration-ivory/30 underline-offset-4 transition-colors hover:text-highlight hover:decoration-highlight"
-            >
-              Start over
-            </button>
-            <button
-              type="button"
-              onClick={openHelp}
-              className="mt-4 cursor-pointer text-sm text-ivory/70 underline decoration-ivory/30 underline-offset-4 transition-colors hover:text-highlight hover:decoration-highlight"
-            >
-              How to play
-            </button>
-          </Overlay>
-        )}
-
-        {phase === "over" && result && (
-          <GameOver
-            {...result}
-            post={post}
-            onAgain={start}
-            onLeaderboard={() => setModal("leaderboard")}
-            onSignIn={() => setModal("auth")}
-          />
-        )}
+          {phase === "over" && result && (
+            <GameOver
+              {...result}
+              post={post}
+              onAgain={start}
+              onLeaderboard={() => setModal("leaderboard")}
+              onSignIn={() => setModal("auth")}
+            />
+          )}
+        </div>
+        {!room.ok && <NoRoom room={room} />}
       </div>
 
       <Help open={helpOpen} onClose={() => setHelpOpen(false)} />
@@ -756,20 +806,27 @@ function WordCard({
   typed,
   rushed,
   dim,
+  height = CARD_H,
+  width,
 }: {
   text: string;
   kind: Kind;
   typed: string;
   rushed?: boolean;
   dim?: boolean;
+  height?: number;
+  width?: number;
 }) {
   const special = kind !== "normal" ? SPECIALS[kind] : null;
   // A missed card on the pile is a faded ghost of itself, so it never reads as typeable.
   if (dim) {
     return (
       <div
-        className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-ivory/10 bg-ivory/[0.13] px-2.5 font-mono text-[15px] leading-none text-ivory/35 line-through decoration-ivory/25 min-[360px]:text-base"
-        style={{ height: CARD_H }}
+        className={`flex items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-md border border-ivory/10 bg-ivory/[0.13] font-mono leading-none text-ivory/35 line-through decoration-ivory/25 ${
+          height < CARD_H ? "" : "text-[15px] min-[360px]:text-base"
+        }`}
+        // Flatter on a short phone board (see Engine.pileH).
+        style={{ height, width, fontSize: height < CARD_H ? Math.max(9, Math.round(height * 0.55)) : undefined }}
       >
         {special && <span aria-hidden>{special.suit}</span>}
         <span>{text}</span>
@@ -851,9 +908,24 @@ function SoundToggle({ label, muted, onClick, children }: { label: string; muted
   );
 }
 
+/** Shown over the board when the window can't fit it. The game stays paused meanwhile. */
+function NoRoom({ room }: { room: Extract<Room, { ok: false }> }) {
+  const [title, body] = room.phone
+    ? ["Not enough room", "Turn your phone upright to keep playing."]
+    : room.reason === "short"
+      ? ["Window too short", `Make the window ${room.by}px taller, or zoom out, to keep playing.`]
+      : ["Window too narrow", `Make the window ${room.by}px wider, or zoom out, to keep playing.`];
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-felt-deep/90 px-6 text-center backdrop-blur-[3px]">
+      <p className="font-display text-3xl sm:text-4xl">{title}</p>
+      <p className="mt-2 max-w-xs text-sm text-ivory/75">{body}</p>
+    </div>
+  );
+}
+
 function Overlay({ children }: { children: ReactNode }) {
   return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-felt-deep/75 px-6 text-center backdrop-blur-[3px]">
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-felt-deep/75 px-6 py-4 text-center backdrop-blur-[3px]">
       {children}
     </div>
   );
@@ -945,13 +1017,13 @@ function GameOver({
     <Overlay>
       <p className="font-mono text-xs uppercase tracking-[0.24em] text-ivory/55">Game over</p>
       {/* The rank, as a playing card. */}
-      <div className="relative mt-4 flex aspect-[5/7] w-24 -rotate-3 flex-col items-center justify-center rounded-lg bg-ivory text-suit-red shadow-[4px_10px_20px_rgba(0,0,0,.45)]">
+      <div className="relative mt-3 flex aspect-[5/7] w-20 -rotate-3 flex-col items-center justify-center rounded-lg bg-ivory text-suit-red shadow-[4px_10px_20px_rgba(0,0,0,.45)]">
         <span className="absolute left-1.5 top-1 font-mono text-xs font-semibold">{rank.short}</span>
-        <span className="font-display text-5xl leading-none">{rank.short}</span>
+        <span className="font-display text-4xl leading-none">{rank.short}</span>
         <span className="text-xl">♥</span>
         <span className="absolute bottom-1 right-1.5 rotate-180 font-mono text-xs font-semibold">{rank.short}</span>
       </div>
-      <p className="mt-4 font-display text-3xl">
+      <p className="mt-3 font-display text-3xl">
         {rank.name} of Hearts{isNew && <span className="ml-2 align-middle font-mono text-xs uppercase tracking-[0.2em] text-highlight">new best</span>}
       </p>
       <p className="mt-1 font-mono text-2xl tabular-nums">{result.score.toLocaleString()}</p>
